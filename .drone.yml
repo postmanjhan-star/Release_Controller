@@ -1,11 +1,65 @@
 ---
 kind: pipeline
 type: docker
+name: quality
+
+platform:
+  os: linux
+  arch: amd64
+
+clone:
+  depth: 1
+
+steps:
+  # Build app/static in the shared workspace before Python tests serve the UI.
+  - name: frontend-quality
+    image: node:20.20.2-bookworm-slim
+    commands:
+      - cd frontend
+      - npm ci
+      - npm run quality
+
+  - name: python-quality
+    image: python:3.10-slim-bookworm
+    depends_on:
+      - frontend-quality
+    environment:
+      APP_ENV: test
+      BACKGROUND_WORKER_ENABLED: "false"
+    commands:
+      - python -m pip install --no-cache-dir -r requirements-dev.txt
+      - python -m ruff check app tests alembic devtools
+      - python -m ruff format --check app tests alembic devtools
+      - python -m pytest --cov=app --cov-report=term-missing --cov-report=xml
+
+  - name: browser-e2e
+    image: mcr.microsoft.com/playwright:v1.62.1-noble
+    depends_on:
+      - python-quality
+    commands:
+      - cd frontend
+      - npm run test:e2e
+
+trigger:
+  branch:
+    exclude:
+      - deploy
+  event:
+    - push
+    - pull_request
+
+
+---
+kind: pipeline
+type: docker
 name: deploy
 
 platform:
   os: linux
   arch: amd64
+
+clone:
+  depth: 1
 
 depends_on:
   - quality
@@ -14,17 +68,28 @@ concurrency:
   limit: 1
 
 steps:
-  # 1. 將 deploy branch 指向這次通過 CI 的 commit
-  - name: promote-deploy-ref
-    image: alpine/git:latest
+  # ----------------------------------------------------------
+  # 1. Validate release version before touching production.
+  #
+  # Prevent:
+  #   v3.0.1 -> commit A
+  #   new commit B still says version=3.0.1
+  #
+  # In that case deployment stops here.
+  # ----------------------------------------------------------
+  - name: release-preflight
+    image: alpine:3.22
     environment:
       GITEA_DEPLOY_USER:
         from_secret: gitea_deploy_user
       GITEA_DEPLOY_TOKEN:
         from_secret: gitea_deploy_token
+
     commands:
+      - apk add --no-cache git
+
       - |
-        cat >/tmp/git-askpass.sh <<'EOF'
+        cat > .drone-git-askpass.sh <<'EOF'
         #!/bin/sh
         case "$1" in
           *Username*) printf '%s\n' "$GITEA_DEPLOY_USER" ;;
@@ -32,17 +97,92 @@ steps:
         esac
         EOF
 
-      - chmod 700 /tmp/git-askpass.sh
-      - export GIT_ASKPASS=/tmp/git-askpass.sh
-      - export GIT_TERMINAL_PROMPT=0
+        chmod 700 .drone-git-askpass.sh
 
-      - git push origin "${DRONE_COMMIT_SHA}:refs/heads/deploy"
+      - |
+        export GIT_ASKPASS="$PWD/.drone-git-askpass.sh"
+        export GIT_TERMINAL_PROMPT=0
 
-  # 2. 要 Portainer pull deploy branch + Docker build + redeploy
+        git fetch --tags origin
+
+        VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml | head -n 1)"
+
+        if [ -z "$VERSION" ]; then
+          echo "Unable to read version from pyproject.toml" >&2
+          exit 1
+        fi
+
+        RELEASE_TAG="v$VERSION"
+
+        echo "Release version: $RELEASE_TAG"
+        echo "Commit: ${DRONE_COMMIT_SHA}"
+
+        EXISTING_TAG_COMMIT="$(
+          git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" || true
+        )"
+
+        if [ -n "$EXISTING_TAG_COMMIT" ] &&
+           [ "$EXISTING_TAG_COMMIT" != "${DRONE_COMMIT_SHA}" ]; then
+
+          echo \
+            "Tag $RELEASE_TAG already points to another commit." \
+            >&2
+
+          echo \
+            "Bump the version in pyproject.toml and uv.lock before deploying." \
+            >&2
+
+          exit 1
+        fi
+
+        printf '%s\n' "$RELEASE_TAG" > .release-tag
+
+
+  # ----------------------------------------------------------
+  # 2. Promote the CI-passed commit to the deploy branch.
+  #
+  # main   = source/development history
+  # deploy = commit currently approved for deployment
+  # ----------------------------------------------------------
+  - name: promote-deploy-ref
+    image: alpine:3.22
+    depends_on:
+      - release-preflight
+
+    environment:
+      GITEA_DEPLOY_USER:
+        from_secret: gitea_deploy_user
+      GITEA_DEPLOY_TOKEN:
+        from_secret: gitea_deploy_token
+
+    commands:
+      - apk add --no-cache git
+
+      - |
+        export GIT_ASKPASS="$PWD/.drone-git-askpass.sh"
+        export GIT_TERMINAL_PROMPT=0
+
+        echo "Promoting ${DRONE_COMMIT_SHA} to deploy branch..."
+
+        git push \
+          origin \
+          "${DRONE_COMMIT_SHA}:refs/heads/deploy"
+
+
+  # ----------------------------------------------------------
+  # 3. Tell Portainer to pull the deploy branch and redeploy.
+  #
+  # This replaces:
+  #   SSH
+  #   deploy-release-controller.sh
+  #   podman build
+  #   podman rm/run
+  # ----------------------------------------------------------
   - name: portainer-redeploy
     image: curlimages/curl:latest
     depends_on:
       - promote-deploy-ref
+
     environment:
       PORTAINER_URL:
         from_secret: portainer_url
@@ -52,88 +192,147 @@ steps:
         from_secret: portainer_stack_id
       PORTAINER_ENDPOINT_ID:
         from_secret: portainer_endpoint_id
+
     commands:
       - |
+        echo "Requesting Portainer redeployment..."
+
         curl -kfsS \
           -X PUT \
-          -H "X-API-Key: ${PORTAINER_API_TOKEN}" \
+          -H "X-API-Key: $PORTAINER_API_TOKEN" \
           -H "Content-Type: application/json" \
-          "${PORTAINER_URL}/api/stacks/${PORTAINER_STACK_ID}/git/redeploy?endpointId=${PORTAINER_ENDPOINT_ID}" \
+          "$PORTAINER_URL/api/stacks/$PORTAINER_STACK_ID/git/redeploy?endpointId=$PORTAINER_ENDPOINT_ID" \
           -d '{"Prune":false}'
 
-  # 3. 確認新版真的活著
+        echo
+        echo "Portainer redeploy request completed."
+
+
+  # ----------------------------------------------------------
+  # 4. Verify that the deployed application is actually healthy.
+  # ----------------------------------------------------------
   - name: verify-deployment
     image: curlimages/curl:latest
     depends_on:
       - portainer-redeploy
+
     commands:
       - |
-        for i in $(seq 1 30); do
+        echo "Waiting for Release Controller health check..."
+
+        for i in $(seq 1 45); do
+
           if curl -fsS \
+            --max-time 5 \
             http://192.168.16.17:3100/health; then
+
             echo
             echo "Deployment healthy."
             exit 0
           fi
 
-          echo "Waiting for release-controller... ($i/30)"
+          echo "Waiting for release-controller... ($i/45)"
           sleep 2
         done
 
-        echo "Deployment health check failed."
+        echo
+        echo "Deployment health check failed." >&2
         exit 1
 
-  # 4. 部署成功後才建立版本 tag
+
+  # ----------------------------------------------------------
+  # 5. Only tag the source commit AFTER production is healthy.
+  #
+  # The tag event triggers the release pipeline below.
+  # ----------------------------------------------------------
   - name: tag-release
-    image: alpine/git:latest
+    image: alpine:3.22
     depends_on:
       - verify-deployment
+
     environment:
       GITEA_DEPLOY_USER:
         from_secret: gitea_deploy_user
       GITEA_DEPLOY_TOKEN:
         from_secret: gitea_deploy_token
+
     commands:
+      - apk add --no-cache git
+
       - |
-        VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml | head -n 1)"
-        test -n "$VERSION"
-
-        RELEASE_TAG="v${VERSION}"
-
-        cat >/tmp/git-askpass.sh <<'EOF'
-        #!/bin/sh
-        case "$1" in
-          *Username*) printf '%s\n' "$GITEA_DEPLOY_USER" ;;
-          *Password*) printf '%s\n' "$GITEA_DEPLOY_TOKEN" ;;
-        esac
-        EOF
-
-        chmod 700 /tmp/git-askpass.sh
-        export GIT_ASKPASS=/tmp/git-askpass.sh
+        export GIT_ASKPASS="$PWD/.drone-git-askpass.sh"
         export GIT_TERMINAL_PROMPT=0
+
+        RELEASE_TAG="$(cat .release-tag)"
 
         git fetch --tags origin
 
         EXISTING_TAG_COMMIT="$(
-          git rev-parse -q --verify \
-            "refs/tags/${RELEASE_TAG}^{commit}" || true
+          git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" || true
         )"
 
-        if [ -n "$EXISTING_TAG_COMMIT" ] &&
-           [ "$EXISTING_TAG_COMMIT" != "$DRONE_COMMIT_SHA" ]; then
+        if [ -n "$EXISTING_TAG_COMMIT" ]; then
+
+          if [ "$EXISTING_TAG_COMMIT" = "${DRONE_COMMIT_SHA}" ]; then
+            echo "$RELEASE_TAG already exists on this commit."
+            echo "Nothing to do."
+            exit 0
+          fi
+
           echo \
-            "Tag ${RELEASE_TAG} already belongs to another commit. Bump version first." \
+            "$RELEASE_TAG unexpectedly points to another commit." \
             >&2
+
           exit 1
         fi
 
-        if [ -z "$EXISTING_TAG_COMMIT" ]; then
-          git tag "$RELEASE_TAG" "$DRONE_COMMIT_SHA"
-          git push origin "refs/tags/${RELEASE_TAG}"
-        fi
+        echo "Creating release tag $RELEASE_TAG"
+
+        git tag "$RELEASE_TAG" "${DRONE_COMMIT_SHA}"
+
+        git push \
+          origin \
+          "refs/tags/$RELEASE_TAG"
+
 
 trigger:
   branch:
     - main
   event:
     - push
+
+
+---
+kind: pipeline
+type: docker
+name: release
+
+platform:
+  os: linux
+  arch: amd64
+
+clone:
+  disable: true
+
+steps:
+  - name: publish-gitea-release
+    image: plugins/gitea-release:1
+
+    settings:
+      api_key:
+        from_secret: gitea_release_token
+
+      base_url:
+        from_secret: gitea_server
+
+      title: "${DRONE_TAG}"
+
+      note: "Automatically published after a successful production deployment."
+
+      files: []
+
+trigger:
+  ref:
+    - refs/tags/v*
+  event:
+    - tag
