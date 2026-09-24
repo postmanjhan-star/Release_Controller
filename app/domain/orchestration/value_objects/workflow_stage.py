@@ -1,0 +1,31 @@
+"""BPMN 穩定 stage ID。
+
+Domain 層：不得 import framework（SQLAlchemy / FastAPI / Pydantic）。
+"""
+
+import enum
+
+
+class WorkflowStage(str, enum.Enum):
+    VALIDATE_FRONTEND = "VALIDATE_FRONTEND"
+    VALIDATE_BACKEND = "VALIDATE_BACKEND"
+    CREATE_RELEASE_BUNDLE = "CREATE_RELEASE_BUNDLE"
+    PROMOTE_BACKEND = "PROMOTE_BACKEND"
+    WAIT_BACKEND_DEPLOYMENT = "WAIT_BACKEND_DEPLOYMENT"
+    PROMOTE_FRONTEND = "PROMOTE_FRONTEND"
+    WAIT_FRONTEND_DEPLOYMENT = "WAIT_FRONTEND_DEPLOYMENT"
+    COMPLETE_RELEASE = "COMPLETE_RELEASE"  # Backward-compatible v2.2 event ID.
+    COMPLETE_DEPLOYMENT = "COMPLETE_DEPLOYMENT"
+    WAIT_PUBLISH_REQUEST = "WAIT_PUBLISH_REQUEST"
+    PREPARE_RELEASE_VERSION = "PREPARE_RELEASE_VERSION"
+    PUBLISH_BACKEND_RELEASE = "PUBLISH_BACKEND_RELEASE"
+    PUBLISH_FRONTEND_RELEASE = "PUBLISH_FRONTEND_RELEASE"
+    COMPLETE_PUBLISH = "COMPLETE_PUBLISH"
+    # Component-agnostic stages.  The per-component names above stay in the enum
+    # because historical events carry them and must still resolve; a component
+    # that is neither "frontend" nor "backend" uses these instead, and which
+    # component it was is read from workflow_events.component.
+    VALIDATE_COMPONENT = "VALIDATE_COMPONENT"
+    PROMOTE_COMPONENT = "PROMOTE_COMPONENT"
+    WAIT_COMPONENT_DEPLOYMENT = "WAIT_COMPONENT_DEPLOYMENT"
+    PUBLISH_COMPONENT_RELEASE = "PUBLISH_COMPONENT_RELEASE"

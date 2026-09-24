@@ -1,0 +1,37 @@
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+.venv/
+venv/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+frontend/coverage/
+frontend/playwright-report/
+
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+.idea/
+.vscode/
+frontend/node_modules/
+test-results/
+.DS_Store
+pnpm-lock.yaml
+
+# Built by `npm run build` (frontend/vite.config.ts outDir) and by the
+# Containerfile's frontend-builder stage; never hand-edited, so it doesn't
+# belong in version control.
+app/static/

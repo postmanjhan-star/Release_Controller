@@ -1,0 +1,74 @@
+---
+kind: pipeline
+type: docker
+name: deploy
+
+platform:
+  os: linux
+  arch: amd64
+
+depends_on:
+  - quality
+
+concurrency:
+  limit: 1
+
+steps:
+  - name: publish-image
+    image: plugins/docker
+    settings:
+      registry: 192.168.16.17:3000
+      repo: 192.168.16.17:3000/gitea_admin/release-controller
+      dockerfile: Containerfile
+      tags:
+        - ${DRONE_COMMIT_SHA}
+      username:
+        from_secret: gitea_registry_user
+      password:
+        from_secret: gitea_registry_token
+      insecure: true
+
+  - name: update-deployment
+    image: alpine/git:latest
+    depends_on:
+      - publish-image
+
+    environment:
+      GITEA_DEPLOY_USER:
+        from_secret: gitea_deploy_user
+      GITEA_DEPLOY_TOKEN:
+        from_secret: gitea_deploy_token
+
+    commands:
+      - |
+        cat >/tmp/git-askpass.sh <<'EOF'
+        #!/bin/sh
+        case "$1" in
+          *Username*) printf '%s\n' "$GITEA_DEPLOY_USER" ;;
+          *Password*) printf '%s\n' "$GITEA_DEPLOY_TOKEN" ;;
+        esac
+        EOF
+      - chmod 700 /tmp/git-askpass.sh
+      - export GIT_ASKPASS=/tmp/git-askpass.sh
+      - export GIT_TERMINAL_PROMPT=0
+
+      - git clone http://192.168.16.17:3000/gitea_admin/Release-Controller-Deploy.git /tmp/deploy
+      - cd /tmp/deploy
+
+      - |
+        sed -i \
+          "s#image: .*gitea_admin/release-controller:.*#image: 192.168.16.17:3000/gitea_admin/release-controller:${DRONE_COMMIT_SHA}#" \
+          compose.portainer.yml
+
+      - git config user.name "drone-ci"
+      - git config user.email "drone-ci@local"
+
+      - git add compose.portainer.yml
+      - git commit -m "deploy release-controller ${DRONE_COMMIT_SHA}"
+      - git push origin main
+
+trigger:
+  branch:
+    - main
+  event:
+    - push

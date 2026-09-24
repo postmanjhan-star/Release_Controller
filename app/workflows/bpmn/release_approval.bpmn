@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_release_controller"
+  targetNamespace="https://release-controller.local/bpmn">
+  <bpmn:process id="release_approval" name="Release approval and deployment" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_release_created" name="Release created">
+      <bpmn:outgoing>Flow_start_approval</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_approval_gate" name="Approval gate">
+      <bpmn:incoming>Flow_start_approval</bpmn:incoming>
+      <bpmn:outgoing>Flow_approval_decision</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_approval_decision" name="Approved?" default="Flow_decision_rejected">
+      <bpmn:incoming>Flow_approval_decision</bpmn:incoming>
+      <bpmn:outgoing>Flow_decision_approved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_decision_rejected</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_start_deployment" name="Await deployment">
+      <bpmn:incoming>Flow_decision_approved</bpmn:incoming>
+      <bpmn:outgoing>Flow_deployment_started</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_execute_deployment" name="Deploy release">
+      <bpmn:incoming>Flow_deployment_started</bpmn:incoming>
+      <bpmn:outgoing>Flow_deployment_result</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_deployment_result" name="Succeeded?" default="Flow_result_failed">
+      <bpmn:incoming>Flow_deployment_result</bpmn:incoming>
+      <bpmn:outgoing>Flow_result_success</bpmn:outgoing>
+      <bpmn:outgoing>Flow_result_failed</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="EndEvent_rejected" name="Rejected">
+      <bpmn:incoming>Flow_decision_rejected</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndEvent_success" name="Success">
+      <bpmn:incoming>Flow_result_success</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndEvent_failed" name="Failed">
+      <bpmn:incoming>Flow_result_failed</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_start_approval" sourceRef="StartEvent_release_created" targetRef="Task_approval_gate" />
+    <bpmn:sequenceFlow id="Flow_approval_decision" sourceRef="Task_approval_gate" targetRef="Gateway_approval_decision" />
+    <bpmn:sequenceFlow id="Flow_decision_approved" name="Approved" sourceRef="Gateway_approval_decision" targetRef="Task_start_deployment">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">decision == 'approved'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_decision_rejected" name="Rejected" sourceRef="Gateway_approval_decision" targetRef="EndEvent_rejected" />
+    <bpmn:sequenceFlow id="Flow_deployment_started" sourceRef="Task_start_deployment" targetRef="Task_execute_deployment" />
+    <bpmn:sequenceFlow id="Flow_deployment_result" sourceRef="Task_execute_deployment" targetRef="Gateway_deployment_result" />
+    <bpmn:sequenceFlow id="Flow_result_success" name="Success" sourceRef="Gateway_deployment_result" targetRef="EndEvent_success">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">deployment_result == 'success'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_result_failed" name="Failed" sourceRef="Gateway_deployment_result" targetRef="EndEvent_failed" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_release_approval">
+    <bpmndi:BPMNPlane id="BPMNPlane_release_approval" bpmnElement="release_approval">
+      <bpmndi:BPMNShape id="Shape_start" bpmnElement="StartEvent_release_created">
+        <dc:Bounds x="60" y="202" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="42" y="245" width="72" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_approval" bpmnElement="Task_approval_gate">
+        <dc:Bounds x="145" y="180" width="130" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_approval_gateway" bpmnElement="Gateway_approval_decision" isMarkerVisible="true">
+        <dc:Bounds x="325" y="195" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="318" y="252" width="65" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_await_deployment" bpmnElement="Task_start_deployment">
+        <dc:Bounds x="430" y="180" width="140" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_deploy" bpmnElement="Task_execute_deployment">
+        <dc:Bounds x="625" y="180" width="140" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_result_gateway" bpmnElement="Gateway_deployment_result" isMarkerVisible="true">
+        <dc:Bounds x="820" y="195" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="813" y="252" width="65" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_rejected" bpmnElement="EndEvent_rejected">
+        <dc:Bounds x="438" y="330" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="430" y="373" width="52" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_success" bpmnElement="EndEvent_success">
+        <dc:Bounds x="940" y="115" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="936" y="158" width="45" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_failed" bpmnElement="EndEvent_failed">
+        <dc:Bounds x="940" y="290" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="939" y="333" width="39" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_start_approval" bpmnElement="Flow_start_approval">
+        <di:waypoint x="96" y="220" /><di:waypoint x="145" y="220" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_approval_decision" bpmnElement="Flow_approval_decision">
+        <di:waypoint x="275" y="220" /><di:waypoint x="325" y="220" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_decision_approved" bpmnElement="Flow_decision_approved">
+        <di:waypoint x="375" y="220" /><di:waypoint x="430" y="220" />
+        <bpmndi:BPMNLabel><dc:Bounds x="382" y="202" width="48" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_decision_rejected" bpmnElement="Flow_decision_rejected">
+        <di:waypoint x="350" y="245" /><di:waypoint x="350" y="348" /><di:waypoint x="438" y="348" />
+        <bpmndi:BPMNLabel><dc:Bounds x="358" y="328" width="48" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_deployment_started" bpmnElement="Flow_deployment_started">
+        <di:waypoint x="570" y="220" /><di:waypoint x="625" y="220" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_deployment_result" bpmnElement="Flow_deployment_result">
+        <di:waypoint x="765" y="220" /><di:waypoint x="820" y="220" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_result_success" bpmnElement="Flow_result_success">
+        <di:waypoint x="845" y="195" /><di:waypoint x="845" y="133" /><di:waypoint x="940" y="133" />
+        <bpmndi:BPMNLabel><dc:Bounds x="866" y="115" width="44" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_result_failed" bpmnElement="Flow_result_failed">
+        <di:waypoint x="845" y="245" /><di:waypoint x="845" y="308" /><di:waypoint x="940" y="308" />
+        <bpmndi:BPMNLabel><dc:Bounds x="871" y="290" width="36" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

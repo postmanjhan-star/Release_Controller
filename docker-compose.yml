@@ -1,0 +1,45 @@
+services:
+  release-controller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: release-controller
+    restart: unless-stopped
+
+    ports:
+      - "3100:8000"
+
+    volumes:
+      - /volume1/docker/release-controller/data:/data
+
+    environment:
+      DATABASE_URL: sqlite:////data/release.db
+
+      APP_ENV: ${APP_ENV:-production}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+
+      DRONE_SERVER: ${DRONE_SERVER}
+      DRONE_TOKEN: ${DRONE_TOKEN}
+
+      GITEA_SERVER: ${GITEA_SERVER}
+      GITEA_TOKEN: ${GITEA_TOKEN}
+
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      GITEA_OAUTH_CLIENT_ID: ${GITEA_OAUTH_CLIENT_ID}
+      GITEA_OAUTH_CLIENT_SECRET: ${GITEA_OAUTH_CLIENT_SECRET}
+      GITEA_OAUTH_CALLBACK_URL: ${GITEA_OAUTH_CALLBACK_URL}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_SSL: ${SMTP_SSL:-false}
+      SMTP_TLS_VERIFY: ${SMTP_TLS_VERIFY:-true}
+
+      SMTP_DEFAULT_RECIPIENTS: ${SMTP_DEFAULT_RECIPIENTS:-}
+
+      BACKGROUND_WORKER_ENABLED: ${BACKGROUND_WORKER_ENABLED:-true}

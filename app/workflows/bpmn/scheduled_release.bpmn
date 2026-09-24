@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_scheduled_release" targetNamespace="http://release-controller/workflows">
+  <bpmn:signal id="Signal_schedule_cancelled" name="Schedule cancelled"/>
+  <bpmn:process id="scheduled_release" name="Scheduled Release" isExecutable="true">
+    <bpmn:startEvent id="SCHEDULE_START" name="Request received"><bpmn:outgoing>S1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:manualTask id="SCHEDULE_DEPLOYMENT" name="Schedule deployment"><bpmn:incoming>S1</bpmn:incoming><bpmn:outgoing>S2</bpmn:outgoing></bpmn:manualTask>
+    <bpmn:task id="SEND_EMAIL_NOTIFICATION" name="Send email notification"><bpmn:incoming>S2</bpmn:incoming><bpmn:outgoing>S3</bpmn:outgoing></bpmn:task>
+    <bpmn:subProcess id="WAIT_SCHEDULED_TIME" name="Await scheduled time">
+      <bpmn:incoming>S3</bpmn:incoming><bpmn:outgoing>S4</bpmn:outgoing>
+      <bpmn:startEvent id="WAIT_TIMER_START"><bpmn:outgoing>WAIT_TIMER_FLOW</bpmn:outgoing></bpmn:startEvent>
+      <bpmn:intermediateCatchEvent id="SCHEDULE_TIMER" name="Scheduled time"><bpmn:incoming>WAIT_TIMER_FLOW</bpmn:incoming><bpmn:outgoing>WAIT_TIMER_DONE_FLOW</bpmn:outgoing><bpmn:timerEventDefinition id="TimerDefinition_scheduled_time"/></bpmn:intermediateCatchEvent>
+      <bpmn:endEvent id="WAIT_TIMER_END"><bpmn:incoming>WAIT_TIMER_DONE_FLOW</bpmn:incoming></bpmn:endEvent>
+      <bpmn:sequenceFlow id="WAIT_TIMER_FLOW" sourceRef="WAIT_TIMER_START" targetRef="SCHEDULE_TIMER"/>
+      <bpmn:sequenceFlow id="WAIT_TIMER_DONE_FLOW" sourceRef="SCHEDULE_TIMER" targetRef="WAIT_TIMER_END"/>
+    </bpmn:subProcess>
+    <bpmn:boundaryEvent id="CANCEL_SCHEDULE" name="Schedule cancelled" attachedToRef="WAIT_SCHEDULED_TIME"><bpmn:outgoing>S_CANCELLED</bpmn:outgoing><bpmn:signalEventDefinition id="SignalDefinition_schedule_cancelled" signalRef="Signal_schedule_cancelled"/></bpmn:boundaryEvent>
+    <bpmn:callActivity id="START_DEPLOYMENT" name="Start deployment workflow"><bpmn:incoming>S4</bpmn:incoming><bpmn:outgoing>S5</bpmn:outgoing></bpmn:callActivity>
+    <bpmn:endEvent id="SCHEDULE_END" name="Deployment triggered"><bpmn:incoming>S5</bpmn:incoming></bpmn:endEvent>
+    <bpmn:endEvent id="END_CANCELLED" name="Cancelled"><bpmn:incoming>S_CANCELLED</bpmn:incoming><bpmn:terminateEventDefinition id="TerminateDefinition_cancelled"/></bpmn:endEvent>
+    <bpmn:sequenceFlow id="S1" sourceRef="SCHEDULE_START" targetRef="SCHEDULE_DEPLOYMENT"/>
+    <bpmn:sequenceFlow id="S2" sourceRef="SCHEDULE_DEPLOYMENT" targetRef="SEND_EMAIL_NOTIFICATION"/>
+    <bpmn:sequenceFlow id="S3" sourceRef="SEND_EMAIL_NOTIFICATION" targetRef="WAIT_SCHEDULED_TIME"/>
+    <bpmn:sequenceFlow id="S4" sourceRef="WAIT_SCHEDULED_TIME" targetRef="START_DEPLOYMENT"/>
+    <bpmn:sequenceFlow id="S5" sourceRef="START_DEPLOYMENT" targetRef="SCHEDULE_END"/>
+    <bpmn:sequenceFlow id="S_CANCELLED" sourceRef="CANCEL_SCHEDULE" targetRef="END_CANCELLED"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_scheduled_release">
+    <bpmndi:BPMNPlane id="Plane_scheduled_release" bpmnElement="scheduled_release">
+      <bpmndi:BPMNShape id="SCHEDULE_START_di" bpmnElement="SCHEDULE_START"><dc:Bounds x="40" y="122" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SCHEDULE_DEPLOYMENT_di" bpmnElement="SCHEDULE_DEPLOYMENT"><dc:Bounds x="120" y="90" width="150" height="100"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SEND_EMAIL_NOTIFICATION_di" bpmnElement="SEND_EMAIL_NOTIFICATION"><dc:Bounds x="320" y="90" width="160" height="100"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="WAIT_SCHEDULED_TIME_di" bpmnElement="WAIT_SCHEDULED_TIME" isExpanded="false"><dc:Bounds x="535" y="90" width="170" height="100"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="CANCEL_SCHEDULE_di" bpmnElement="CANCEL_SCHEDULE"><dc:Bounds x="555" y="172" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="START_DEPLOYMENT_di" bpmnElement="START_DEPLOYMENT"><dc:Bounds x="780" y="90" width="160" height="100"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SCHEDULE_END_di" bpmnElement="SCHEDULE_END"><dc:Bounds x="990" y="122" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="END_CANCELLED_di" bpmnElement="END_CANCELLED"><dc:Bounds x="555" y="292" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="S1_di" bpmnElement="S1"><di:waypoint x="76" y="140"/><di:waypoint x="120" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="S2_di" bpmnElement="S2"><di:waypoint x="270" y="140"/><di:waypoint x="320" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="S3_di" bpmnElement="S3"><di:waypoint x="480" y="140"/><di:waypoint x="535" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="S4_di" bpmnElement="S4"><di:waypoint x="705" y="140"/><di:waypoint x="780" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="S5_di" bpmnElement="S5"><di:waypoint x="940" y="140"/><di:waypoint x="990" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="S_CANCELLED_di" bpmnElement="S_CANCELLED"><di:waypoint x="573" y="208"/><di:waypoint x="573" y="292"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

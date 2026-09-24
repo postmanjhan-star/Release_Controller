@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_frontend_only" targetNamespace="http://release-controller/workflows">
+  <bpmn:process id="frontend_only" name="Frontend Only Release" isExecutable="true">
+    <bpmn:startEvent id="START" name="Start"><bpmn:outgoing>F1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:serviceTask id="VALIDATE_FRONTEND" name="Validate Frontend"><bpmn:incoming>F1</bpmn:incoming><bpmn:outgoing>F2</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="PROMOTE_FRONTEND" name="Promote Frontend"><bpmn:incoming>F2</bpmn:incoming><bpmn:outgoing>F3</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:receiveTask id="WAIT_FRONTEND_DEPLOYMENT" name="Wait Frontend Deployment"><bpmn:incoming>F3</bpmn:incoming><bpmn:outgoing>F4</bpmn:outgoing></bpmn:receiveTask>
+    <bpmn:serviceTask id="COMPLETE_DEPLOYMENT" name="Complete Deployment"><bpmn:incoming>F4</bpmn:incoming><bpmn:outgoing>F5</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:receiveTask id="WAIT_PUBLISH_REQUEST" name="Wait Publish Request"><bpmn:incoming>F5</bpmn:incoming><bpmn:outgoing>F6</bpmn:outgoing></bpmn:receiveTask>
+    <bpmn:serviceTask id="PREPARE_RELEASE_VERSION" name="Prepare Release Version"><bpmn:incoming>F6</bpmn:incoming><bpmn:outgoing>F7</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="PUBLISH_FRONTEND_RELEASE" name="Publish Frontend Release"><bpmn:incoming>F7</bpmn:incoming><bpmn:outgoing>F8</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="COMPLETE_PUBLISH" name="Complete Publish"><bpmn:incoming>F8</bpmn:incoming><bpmn:outgoing>F9</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:endEvent id="END" name="Published"><bpmn:incoming>F9</bpmn:incoming></bpmn:endEvent>
+    <bpmn:sequenceFlow id="F1" sourceRef="START" targetRef="VALIDATE_FRONTEND"/>
+    <bpmn:sequenceFlow id="F2" sourceRef="VALIDATE_FRONTEND" targetRef="PROMOTE_FRONTEND"/>
+    <bpmn:sequenceFlow id="F3" sourceRef="PROMOTE_FRONTEND" targetRef="WAIT_FRONTEND_DEPLOYMENT"/>
+    <bpmn:sequenceFlow id="F4" sourceRef="WAIT_FRONTEND_DEPLOYMENT" targetRef="COMPLETE_DEPLOYMENT"/>
+    <bpmn:sequenceFlow id="F5" sourceRef="COMPLETE_DEPLOYMENT" targetRef="WAIT_PUBLISH_REQUEST"/>
+    <bpmn:sequenceFlow id="F6" sourceRef="WAIT_PUBLISH_REQUEST" targetRef="PREPARE_RELEASE_VERSION"/>
+    <bpmn:sequenceFlow id="F7" sourceRef="PREPARE_RELEASE_VERSION" targetRef="PUBLISH_FRONTEND_RELEASE"/>
+    <bpmn:sequenceFlow id="F8" sourceRef="PUBLISH_FRONTEND_RELEASE" targetRef="COMPLETE_PUBLISH"/>
+    <bpmn:sequenceFlow id="F9" sourceRef="COMPLETE_PUBLISH" targetRef="END"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_frontend_only">
+    <bpmndi:BPMNPlane id="Plane_frontend_only" bpmnElement="frontend_only">
+      <bpmndi:BPMNShape id="START_di" bpmnElement="START"><dc:Bounds x="40" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="VALIDATE_FRONTEND_di" bpmnElement="VALIDATE_FRONTEND"><dc:Bounds x="120" y="80" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="PROMOTE_FRONTEND_di" bpmnElement="PROMOTE_FRONTEND"><dc:Bounds x="290" y="80" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="WAIT_FRONTEND_DEPLOYMENT_di" bpmnElement="WAIT_FRONTEND_DEPLOYMENT"><dc:Bounds x="460" y="80" width="140" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="COMPLETE_DEPLOYMENT_di" bpmnElement="COMPLETE_DEPLOYMENT"><dc:Bounds x="650" y="80" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="WAIT_PUBLISH_REQUEST_di" bpmnElement="WAIT_PUBLISH_REQUEST"><dc:Bounds x="820" y="80" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="PREPARE_RELEASE_VERSION_di" bpmnElement="PREPARE_RELEASE_VERSION"><dc:Bounds x="990" y="80" width="130" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="PUBLISH_FRONTEND_RELEASE_di" bpmnElement="PUBLISH_FRONTEND_RELEASE"><dc:Bounds x="1170" y="80" width="140" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="COMPLETE_PUBLISH_di" bpmnElement="COMPLETE_PUBLISH"><dc:Bounds x="1360" y="80" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="END_di" bpmnElement="END"><dc:Bounds x="1530" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="F1_di" bpmnElement="F1"><di:waypoint x="76" y="120"/><di:waypoint x="120" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F2_di" bpmnElement="F2"><di:waypoint x="240" y="120"/><di:waypoint x="290" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F3_di" bpmnElement="F3"><di:waypoint x="410" y="120"/><di:waypoint x="460" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F4_di" bpmnElement="F4"><di:waypoint x="600" y="120"/><di:waypoint x="650" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F5_di" bpmnElement="F5"><di:waypoint x="770" y="120"/><di:waypoint x="820" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F6_di" bpmnElement="F6"><di:waypoint x="940" y="120"/><di:waypoint x="990" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F7_di" bpmnElement="F7"><di:waypoint x="1120" y="120"/><di:waypoint x="1170" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F8_di" bpmnElement="F8"><di:waypoint x="1310" y="120"/><di:waypoint x="1360" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F9_di" bpmnElement="F9"><di:waypoint x="1480" y="120"/><di:waypoint x="1530" y="120"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
