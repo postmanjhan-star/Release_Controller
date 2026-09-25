@@ -1,119 +1,54 @@
-# Gitea 與 Drone 整合指南
+# Gitea / Drone 整合
 
-本 repository 根目錄的 `.drone.yml` 已負責 Release Controller 自身的品質檢查與 container
-部署。本章則是下游 Frontend/Backend 發布流程的下一階段整合設計；**目前仍未包含 Gitea
-webhook endpoint 或 API authentication**，下列通報流程需由 CI/CD 維護者另行建立後才會
-自動運作。
+本頁說明 Release Controller 如何部署下游專案。本專案自身的 Portainer 部署另見 [CI/CD](cicd.md)。
 
-## 建議責任分工
+## 現行流程
 
 ```text
-Gitea push
-  -> Drone test/build
-  -> POST /releases                         建立 PENDING
-  -> 人員在 Release Controller approve
-  -> deployment executor poll/receive event
-  -> POST /deployment/start                 記錄 DEPLOYING
-  -> executor 實際部署 + health check
-  -> POST /deployment/finish                記錄 SUCCESS/FAILED
+Gitea repository → Drone build
+                        ↓
+操作者登入 Controller → 選專案、元件、build 與 target
+                        ↓
+Controller 呼叫 Drone promote → 追蹤 promotion build
+                        ↓
+部署成功 → 操作者提出發布請求 → Gitea tag / Release
 ```
 
-- **Gitea**：保存 source、commit 與 webhook event。
-- **Drone**：test/build，成功後建立 release，不替人核准正式環境。
-- **Release Controller**：審核狀態、BPMN 與歷程的唯一來源。
-- **Deployment executor**：操作目標平台並回報結果。
+- **Gitea** 保存程式碼、提供 OAuth 登入及 Release API。
+- **Drone** 負責下游 build、實際部署與該 pipeline 的健康檢查。
+- **Controller** 驗證 build、安排順序、呼叫 promotion、追蹤結果與保存事件。
 
-至少在第一階段，保留 `Approve/Reject` 為人工動作；其餘三個 API 動作適合自動化。
+Bundle 依專案元件順序執行，可選任意子集；並非固定 Backend → Frontend。
+Controller 不直接登入下游主機，也不執行下游部署 shell。
 
-## Drone 建立 release
+## 接入一個專案
 
-概念性 shell step：
+1. 在 Drone 啟用 repository，讓來源 build 能正常完成。
+2. 在下游 repository 設定可接受 promotion event 與預定 target 的部署 pipeline。
+3. 在 Controller 的 **Projects → Connections** 建立 Drone / Gitea 連線並測試。
+4. 建立專案，設定元件的 Drone / Gitea repository、順序與預設 target。
+5. 執行專案驗證，以測試環境的成功 build 驗證單元件部署，再驗證 Bundle。
 
-```bash
-set -eu
+連線解析順序為元件覆寫 → 專案設定 → 同類型預設連線。
+Token 需具有對應 repository 的查詢、promotion 或 Release 建立權限。
+Branch 來自 Drone repository metadata 與近期 build history；target 是部署環境，兩者不同。
 
-BASE_URL="http://release-controller:8000/api/v1"
-PAYLOAD="$(jq -n \
-  --arg repository "$DRONE_REPO" \
-  --arg branch "$DRONE_BRANCH" \
-  --arg commit_sha "$DRONE_COMMIT_SHA" \
-  --arg environment "pre-production" \
-  --arg message "Drone build $DRONE_BUILD_NUMBER passed" \
-  '{repository:$repository, branch:$branch, commit_sha:$commit_sha,
-    environment:$environment, message:$message}')"
+## 追蹤與失敗
 
-RESPONSE="$(curl -fsS -X POST "$BASE_URL/releases" \
-  -H 'Content-Type: application/json' \
-  -d "$PAYLOAD")"
-RELEASE_ID="$(printf '%s' "$RESPONSE" | jq -r .id)"
-printf 'Created release %s\n' "$RELEASE_ID"
-```
+Source build 與 promotion build 分開保存。Controller 依 promotion build 狀態判定部署結果，
+下游 pipeline 應將部署及健康檢查失敗回報為 build failure。
+啟用背景 worker 後會持續追蹤未完成工作；也可透過 UI / API refresh。
 
-`DRONE_*` 變數名稱需依實際 Drone 版本與 pipeline 調整。`jq` 必須存在於 step image。
-正式串接 authentication 後，token 應由 Drone secret 注入 header，不能寫進 YAML 或 log。
+Bundle 某元件失敗會停止後續元件；已成功的元件保留結果。
+發布另有獨立狀態，Gitea Release 失敗不會抹掉部署成功紀錄。
+呼叫 promotion 或建立 Release 遇到不確定結果時，先查詢歷程及上游狀態，不盲目重送。
 
-相同 repository、commit、environment 重試時會回 409。Pipeline 應採以下其中一種策略：
+## 舊版核准流程與尚未支援項目
 
-- 將 409 視為已建立，再以精確 filter 查詢既有 release。
-- 第一次回應後把 `release_id` 保存成 deployment metadata。
-- 未來新增 idempotency key；在 endpoint 實作前不能假設已支援。
+舊版 `POST /api/v1/releases` 仍提供 `PENDING → APPROVED → DEPLOYING → SUCCESS/FAILED`
+及 `REJECTED` 流程。其 start / finish API 只記錄狀態，沒有接上 Drone promotion。
+目前的直接 promotion 與排程也沒有自動串接這個人工核准關卡；不要假設所有部署都必經審核。
 
-## 等候核准
-
-現有 API 沒有 callback/event stream。Deployment executor 可定期查詢單筆 release：
-
-```bash
-curl -fsS "$BASE_URL/releases/$RELEASE_ID"
-```
-
-- `PENDING`：繼續等候，但必須有 timeout。
-- `APPROVED`：進入部署。
-- `REJECTED`：停止 pipeline，視為有意識的拒絕而非系統錯誤。
-- 其他狀態：依 recovery policy 處理，不要重複 start/finish。
-
-建議 polling 間隔 5 至 15 秒並有最大等待時間。較成熟的版本可加入 signed callback 或
-message queue，避免長時間佔用 Drone runner。
-
-## 部署與回報
-
-Executor 取得 `APPROVED` 後：
-
-```bash
-curl -fsS -X POST "$BASE_URL/releases/$RELEASE_ID/deployment/start"
-
-if ./deploy-and-health-check.sh; then
-  curl -fsS -X POST "$BASE_URL/releases/$RELEASE_ID/deployment/finish" \
-    -H 'Content-Type: application/json' \
-    -d '{"status":"SUCCESS","message":"Deployment and health check passed"}'
-else
-  curl -fsS -X POST "$BASE_URL/releases/$RELEASE_ID/deployment/finish" \
-    -H 'Content-Type: application/json' \
-    -d '{"status":"FAILED","message":"Deployment or health check failed"}'
-  exit 1
-fi
-```
-
-實作時應用 `trap` 或等效的 finally 機制，避免 executor 在 `deployment/start` 後異常退出，
-讓 release 永遠卡在 `DEPLOYING`。錯誤 message 不得包含 token、密碼或完整敏感 log。
-
-## Gitea webhook
-
-原規格規劃未來加入 `POST /api/v1/webhooks/gitea`。若實作：
-
-- 驗證 Gitea 提供的 HMAC signature，使用原始 request body 計算並 constant-time compare。
-- 檢查 event type、repository allowlist、branch/environment mapping。
-- 以 delivery ID 或 commit/environment 做去重。
-- Secret 由環境/secret manager 注入，不能寫在 repository。
-- Webhook 只建立 release；不應繞過 approval gate 直接部署。
-
-若 Drone 已經在 build 成功後建立 release，Gitea webhook 就不應重複建立同一筆。先選定
-單一建立來源，或者明確做 idempotency。
-
-## 網路
-
-在同一 Podman `release-net` 的 CI/executor container 可使用
-`http://release-controller:8000`。若 Drone runner 不在同一 network，建議透過 TLS reverse
-proxy 暴露受驗證 endpoint；目前 `127.0.0.1:3100` 只供 VM 本機與 SSH tunnel 使用。
-
-正式啟用前請完成[安全指南](security.md)的 authentication、authorization、secret 與
-audit 檢核。
+Controller 的業務 API 已受 Gitea session 保護，尚無 service token 或 Gitea webhook
+接收／驗章功能。不能把未帶 session 的 CI curl 範例當作可用的正式整合方式。
+API 契約見 [API 使用指南](api-guide.md)，權限界線見[安全指南](security.md)。

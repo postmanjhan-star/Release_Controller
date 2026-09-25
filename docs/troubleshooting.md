@@ -1,192 +1,81 @@
 # 疑難排解
 
-## 前端顯示 Service unavailable
+先確認問題發生在本機、Drone pipeline、Portainer 建置或應用程式執行階段。
+本機網址預設 `http://127.0.0.1:8000`；容器主機預設埠為 `3100`，以實際設定為準。
 
-先直接查 health：
+## 啟動與畫面
 
-```powershell
-Invoke-WebRequest http://127.0.0.1:8000/health
-```
+| 症狀 | 檢查方式 |
+| --- | --- |
+| 連線拒絕 | 確認 `uv run dev` 或容器已啟動、綁定位址與埠正確 |
+| `/health` 回 503 | 檢查資料庫路徑、掛載與寫入權限 |
+| 首頁空白或舊版 | 在 `frontend` 執行 `npm ci`、`npm run build`，完整重啟後端並重新整理 |
+| API 回 HTML | 檢查前後端版本與 reverse proxy；`/api/*` 不應被導回首頁 |
+| Port 8000 被占用 | 停止已確認的舊服務，或使用 `uv run dev --port 8001` |
+| PowerShell 無法啟用 `.venv` | 直接用 `uv run`，不需要修改 execution policy |
+| `no such table` | 確認 `DATABASE_URL`，執行 `uv run db-current`、`uv run db-upgrade` |
 
-- 連線拒絕：Uvicorn 沒啟動或 port 錯誤。
-- HTTP 503：服務在，但資料庫連線/權限有問題。
-- HTTP 200：檢查瀏覽器 Console/Network 是否是錯誤 host、cache 或 API 失敗。
+FastAPI 提供的是 `app/static`，不是 `frontend/src`。前端建置需求見[本機安裝](getting-started.md)。
 
-VM 上改用：
+## 登入與連線
 
-```bash
-curl -v http://127.0.0.1:3100/health
-podman logs --tail 200 release-controller
-```
+- **OAuth 未設定／redirect 失敗**：確認 client ID、secret、Gitea URL 與 callback 完全一致。
+- **登入後仍 401**：確認 session 是否過期、cookie 是否送出。HTTP 本機測試需
+  `AUTH_COOKIE_SECURE=false`；正式環境使用 HTTPS。
+- **設定寫入回 403**：檢查 `PROJECT_ADMIN_WRITES` 與 `/api/v1/auth/session` 的 `user.is_admin`。
+- **`key_mismatch`**：目前 `APP_SECRET_KEY` 與加密時不同；恢復正確 key 或重新輸入連線 token。
+- **沒有專案／build**：先建立連線、專案與啟用的元件，測試連線並驗證 repository / token 權限。
+- **缺少 branch**：清單取自近期 build history 與 repository default branch，不是所有 Git branch 的完整列表。
 
-## API 顯示 `Unexpected token '<'` 或回傳 `<!doctype html>`
+匿名 curl 呼叫業務 API 回 401 是預期行為；`/health` 則不需登入。
+上游全域健康檢查使用 env 設定，實際發布使用 Connections；請分別檢查。
 
-前端收到的是 HTML 首頁而不是 JSON API，通常是新前端搭配舊後端，或 reverse proxy 把
-未知 `/api/*` 路徑導回首頁。先直接檢查 endpoint：
+## 部署、發布與排程
 
-```powershell
-Invoke-WebRequest http://127.0.0.1:8000/api/v1/notifications/recipients
-```
+| 症狀 | 檢查方式 |
+| --- | --- |
+| Promotion 回 409 | 查看 build 是否可部署、是否已有相同 promotion 或工作仍在執行 |
+| Bundle 部分失敗 | 查看每個元件的 status、failed stage、error code 與 cancel reason；成功元件不必重跑 |
+| 部署成功但版本未發布 | Deployment 與 Publish 是不同步驟，需另送發布請求 |
+| Tag 衝突 | 確認版本對應的 commit，不能用同名 tag 發布其他 commit |
+| 排程未執行 | 確認背景 worker、時區、到期時間、排程狀態及 log |
+| 排程顯示已觸發 | 再查看關聯的 deployment / Bundle；觸發成功不代表部署已完成 |
+| 通知未寄出 | 檢查 SMTP、收件人及 outbox 的 attempts / last_error / next_attempt_at |
+| 附件上傳失敗 | 檢查大小上限與 multipart 欄位，詳見 [API 指南](api-guide.md) |
 
-正確回應的 `Content-Type` 是 `application/json`。若看到 HTML，本機請套 migration 並完整
-重啟 Uvicorn：
+流程圖未更新時，使用 Refresh 並檢查事件 API。Promotion 查 `/releases/{id}/events` 或
+`/deployments/{id}/events`；舊版核准才使用 `/releases/{id}/workflow`，路徑前綴為 `/api/v1`。
+不要直接修改 workflow state JSON 或資料庫狀態。
 
-```powershell
-uv run db-upgrade
-uv run dev
-```
+## Drone / Portainer
 
-VM 請重新 build／替換 container，再確認 API；只複製 `app/static` 不算完整部署：
+- **沒有 build**：確認 repository 已在 Drone 啟用、webhook 成功且 branch / event 符合 trigger。
+- **Pipeline pending**：確認 Docker runner 在線、資源與 image registry 可用。
+- **缺少 secret／版本衝突**：依 [CI/CD](cicd.md) 檢查 secrets 與版本來源。
+- **Portainer build 找不到 Dockerfile**：Stack 的 Compose path 應為 `compose.portainer.yml`。
+- **Portainer 無法 pull／build**：檢查 Stack 的 Git 憑證、`deploy` 分支、DNS、CA、npm / PyPI 存取。
+- **找不到 `stack.env`**：檢查 Portainer Stack 的應用程式環境設定與檔案是否可供 Compose 載入。
+- **服務已啟動但 CI health 失敗**：確認 `.drone.yml` 的檢查 URL 與主機埠相符，且 runner 可達。
 
-```bash
-curl -i http://127.0.0.1:3100/api/v1/notifications/recipients
-podman logs --tail 200 release-controller
-```
+目前不會自動回滾；Portainer 回應成功也不等於應用程式已健康。
 
-## 本機 port 8000 已被占用
+## 容器與資料目錄
 
-PowerShell：
-
-```powershell
-Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
-```
-
-確認 process 後結束舊服務，或使用其他 port：
-
-```powershell
-uv run dev --port 8001
-```
-
-網址也要改成 `http://127.0.0.1:8001/`。
-
-## `Activate.ps1` 被 execution policy 阻擋
-
-不需修改全機 policy 或手動啟用 `.venv`，由 uv 執行即可：
-
-```powershell
-uv run test
-uv run db-upgrade
-uv run dev
-```
-
-## `no such table: releases`
-
-尚未執行 migration，或 `DATABASE_URL` 指到另一個 database：
-
-```powershell
-Get-Content .env
-uv run db-current
-uv run db-upgrade
-```
-
-修改 `.env` 後重啟 process。不要在不確定的 database 上執行 downgrade。
-
-## 前端是舊版或空白
-
-FastAPI 服務的是 `app/static`。修改 `frontend/src` 後重新 build：
-
-```powershell
-Set-Location frontend
-npm ci
-npm run build
-Set-Location ..
-```
-
-重新啟動 Uvicorn，瀏覽器 hard refresh。若 build 失敗，確認 Node 20.19+（或 22.12+）
-並保留完整 npm
-錯誤輸出。Container build 會在 Node stage 自動執行 `npm ci` 與 `npm run build`。
-
-## 建立 release 回 409
-
-同一組 `repository + commit_sha + environment` 已存在，或重複執行狀態轉移。先查詢：
+在 Docker 主機執行，或使用 Portainer 的容器頁面：
 
 ```bash
-curl -fsS "http://127.0.0.1:8000/api/v1/releases?repository=REPO&environment=ENV"
+docker ps -a --filter name=release-controller
+docker logs --tail 200 release-controller
+docker inspect release-controller --format '{{json .Mounts}}'
+curl -fsS http://127.0.0.1:3100/health
 ```
 
-不要藉由更改 commit SHA 字串格式規避唯一限制；CI 應保存既有 `release_id`。
+啟動即退出時，優先檢查 `APP_SECRET_KEY`、OAuth / auth 設定、migration 與 `/data` 權限。
+確認 `DATABASE_URL=sqlite:////data/release.db`、實際 `DATA_DIR`，不要用 `chmod -R 777` 排除權限問題。
 
-## 按鈕不見或不能按
+只能從主機存取時，檢查 `HOST_IP`、防火牆與 reverse proxy。Loopback 綁定不會讓其他主機直接連入。
 
-前端只顯示目前狀態允許的動作：
+## 回報問題
 
-- `PENDING` 才有 Approve/Reject。
-- `APPROVED` 才有 Start deployment。
-- `DEPLOYING` 才有 Mark success/failed。
-- 完成狀態沒有後續按鈕。
-
-選取 release 並查看畫面上方 status；也可呼叫 `GET /api/v1/releases/{id}`。
-
-## BPMN 沒有同步
-
-頁面可見時每 5 秒同步。按右上 refresh；再檢查：
-
-```bash
-curl -fsS http://127.0.0.1:8000/api/v1/workflows/release-definition
-curl -fsS http://127.0.0.1:8000/api/v1/releases/RELEASE_ID/workflow
-```
-
-若 release status 已變但 workflow endpoint 500，保留 database 備份及 server log 再分析，
-不要直接編輯 `release_workflows.state_json`。
-
-## Podman build 無法下載依賴
-
-Container build 需存取 base image registry、npm 與 PyPI。檢查 VM 的 DNS、proxy、CA 與
-registry mirror：
-
-```bash
-podman pull node:20-bookworm-slim
-podman pull python:3.10-slim-bookworm
-podman build --log-level=debug -f Containerfile -t localhost/release-controller:test .
-```
-
-公司使用 TLS inspection 時，應由維運人員把 CA 正確安裝到 host/build environment；
-不要以關閉 TLS 驗證當長期解法。
-
-## Container 一啟動就退出
-
-```bash
-podman ps -a --filter name=release-controller
-podman logs release-controller
-podman inspect release-controller --format '{{.State.ExitCode}} {{.State.Error}}'
-```
-
-常見原因是 migration、`/data` 權限、錯誤的 `DATABASE_URL` 或 port 衝突。標準值是
-`sqlite:////data/release.db`，四個斜線代表絕對路徑。
-
-## `/data` permission denied
-
-確認 bind mount 與 host 目錄：
-
-```bash
-podman inspect release-controller --format '{{json .Mounts}}'
-ls -ld "$HOME/services/release-controller/data"
-ls -l "$HOME/services/release-controller/data"
-```
-
-所有 Podman 指令使用同一個 rootless 帳號，SELinux host 掛載時保留 `:Z`。不要直接
-`chmod -R 777`；應由 VM 維運人員依 user namespace 設定正確 owner/label。
-
-## VM 可以 curl，本機瀏覽器不能開
-
-因為服務只綁 VM loopback，需在本機保持 SSH tunnel：
-
-```bash
-ssh -v -N -L 3100:127.0.0.1:3100 <VM_USER>@<VM_HOST>
-```
-
-本機再開 `http://127.0.0.1:3100/`。若本機 port 被占用，改成
-`-L 13100:127.0.0.1:3100` 並開 `http://127.0.0.1:13100/`。
-
-## 需要提供哪些診斷資訊
-
-回報問題時，提供以下資訊並先移除 secret：
-
-- Git commit：`git log -1 --oneline`。
-- Python/Node/Podman 版本。
-- `/health` HTTP status 與 body。
-- `podman ps -a` 與相關時間範圍的 log。
-- Alembic current revision。
-- 操作前 release status、呼叫 endpoint 與 HTTP status。
-
-不要傳送 `.env`、Authorization header、SSH key 或完整 production database。
+提供 commit / 版本、失敗的 pipeline step、HTTP status、紀錄 ID 與相關時間範圍的 log。
+先去除 token、cookie、個資與敏感內容；不要附上 `.env` 或完整正式資料庫。

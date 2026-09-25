@@ -1,5 +1,8 @@
 # 後端架構審查：DDD / Onion Architecture 全面對照
 
+> 歷史審查紀錄：保留當時的分析、進度與量測，不代表目前版本的完整狀態。
+> 現行程式結構與驗證方式請見[系統架構](architecture.md)及[品質檢查](quality-gates.md)。
+
 審查對象：`app/`（FastAPI 0.116 + SQLAlchemy 2.0 + Alembic + SQLite，9,683 行 / 73 個 .py）
 審查基準：dddpy 風格的 Onion Architecture 四層（Domain / Infrastructure / UseCase / Presentation）
 日期：2026-09-04

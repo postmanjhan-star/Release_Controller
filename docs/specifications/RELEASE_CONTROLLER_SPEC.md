@@ -1,5 +1,8 @@
 # Release Controller FastAPI 規格
 
+> 歷史版本規格：保留原始需求與設計，部分流程與部署方式已變更。
+> 目前操作以[文件索引](../README.md)、[API 指南](../api-guide.md)及[部署設定](../deployment.md)為準。
+
 > 目標：建立一個可直接進 Git 版控、可由 `scripts/deploy-release-controller.sh` 在 Gitea VM 上使用 Podman build / run 的 FastAPI 服務。
 >
 > 本文件是實作規格。Agent 應依此文件完成可執行、可測試、可容器化部署的專案。

@@ -1,154 +1,77 @@
 # 系統架構
 
-## 元件
+## 執行流程
 
 ```text
-Browser
-  |  HTML/JS, REST
-  v
-FastAPI (Uvicorn, one process in container)
-  |-- StaticFiles -> app/static
-  |-- ReleaseOrchestrator -> Backend-first workflow
-  |-- DroneBuildService -> Drone API (two independent repos)
-  |-- DeploymentService -> SQLAlchemy -> SQLite
-  +-- Legacy ReleaseService/WorkflowService (preserved v1)
-  +-- BackgroundWorker -> persisted schedules + email outbox
-
-Drone Frontend Repo          Drone Backend Repo
-  +-- independent promote      +-- independent promote
+React / TypeScript UI
+        ↓ REST / session cookie
+FastAPI ── OAuth ── Gitea
+        ├─ 專案、元件與加密連線
+        ├─ Promotion orchestration ── Drone API
+        ├─ Publish orchestration ── Gitea Release API
+        ├─ 舊版核准流程 ── SpiffWorkflow
+        └─ 背景 worker ── 排程、復原、通知 outbox ── SMTP
+                        ↓
+                 SQLAlchemy / SQLite
 ```
 
-- **FastAPI** 提供 UI、release API、workflow API 與 health endpoint。
-- **SQLAlchemy/Alembic** 管理資料存取與 schema migration。
-- **Drone API client** 查詢、驗證與 promote 兩個獨立 repository。
-- **Release Orchestrator** 先部署 Backend，再依結果啟動或取消 Frontend。
-- **Workflow events** 保存 current/failed/cancelled stage 的 append-only audit。
-- **bpmn-js Viewer** 載入 machine-readable BPMN-DI，並以 workflow events 疊加即時執行狀態。
-- **SpiffWorkflow** 仍執行並保存既有 v1 approval workflow。
-- **SQLite WAL** 支援目前的單機、小量並行使用方式。
+每個專案可設定任意數量的元件，各元件有 repository、部署順序、target 與連線設定。
+單元件 promotion 與 Bundle 共用部署邏輯；Bundle 按專案順序執行所選元件，並非固定兩個 repository。
 
-## Release 與 BPMN 的關係
+Source build 用來選定來源 commit，promotion build 用來追蹤實際部署。
+部署與 Gitea Release 發布分別保存狀態，發布失敗不覆寫部署結果。
 
-建立 release 的同一個 transaction 會建立 workflow instance。業務狀態與 BPMN task
-在服務層一起推進：
+## 程式分層
 
-| Release 動作 | Release 狀態 | SpiffWorkflow 動作 |
-| --- | --- | --- |
-| create | `PENDING` | 建立 instance，等待 `Task_approval_gate` |
-| approve | `APPROVED` | 完成 approval，decision=`approved` |
-| reject | `REJECTED` | 完成 approval，decision=`rejected`，到結束事件 |
-| deployment/start | `DEPLOYING` | 完成 `Task_start_deployment` |
-| deployment/finish | `SUCCESS`/`FAILED` | 完成 deployment 並走到對應結束事件 |
+| 路徑 | 責任 |
+| --- | --- |
+| `app/api/`、`app/schemas/` | HTTP 路由、請求驗證與回應 |
+| `app/domain/` | 領域實體、狀態及 repository / gateway 介面 |
+| `app/usecase/` | 已抽出的 release、registry 與 orchestration 用例 |
+| `app/infrastructure/` | 依賴注入、SQLite repository 與上游 adapter |
+| `app/services/` | 部署、發布、排程、通知、驗證及既有流程協調 |
+| `app/integrations/` | Drone / Gitea HTTP client 與重試處理 |
+| `app/db/`、`alembic/` | SQLAlchemy models、session 與 migration |
+| `frontend/src/` | React shell、登入狀態、API client、controller 與 BPMN viewer |
 
-Release 狀態是 API 行為判斷的主要業務狀態；序列化的 Spiff workflow 是流程圖執行
-細節。兩者都儲存在同一個 SQLite transaction 中，避免只更新其中一側。
+後端正逐步分層，仍有 service 直接協調 SQLAlchemy 與外部服務；不要把歷史 DDD 審查中的目標
+架構視為全部已完成。依賴組裝集中在 `app/infrastructure/di/injection.py`。
 
-舊資料若沒有 workflow，第一次查詢或轉移時會依 release status 補建相符的 instance。
+## 主要資料
 
-## 資料模型
+| 資料表 | 內容 |
+| --- | --- |
+| `projects`、`project_components`、`upstream_connections` | 專案、元件與加密的上游連線 |
+| `deployments`、`release_bundles` | 單元件與 Bundle 部署狀態 |
+| `publish_records`、`workflow_events` | 發布結果與流程事件 |
+| `deployment_schedules`、`schedule_component_builds` | 排程時間及各元件的來源 build |
+| `email_outbox`、`email_notification_cursors`、`notification_recipients` | 通知投遞、事件進度與共用名單 |
+| `auth_sessions`、`oauth_login_attempts` | 登入 session 與 OAuth 流程 |
+| `releases`、`release_workflows` | 保留的舊版核准紀錄與 SpiffWorkflow 狀態 |
 
-### v2.2 orchestration tables
+排程時間以 UTC 保存，另保留 IANA 時區。通知附件也存於 SQLite，資料庫備份包含附件。
+連線 token 需配合原 `APP_SECRET_KEY` 才能解密。
 
-- `release_bundles`：bundle status、workflow instance、current/failed stage 與 safe error。
-- `deployments`：component、source/promotion build、target、status、error/cancel reason。
-- `workflow_events`：append-only stage/event history。
+## Workflow 與背景工作
 
-這三表由 `20260821_0003` 直接接在 v1 head 後建立；`releases` 與
-`release_workflows` 不刪除、不改寫，因此既有資料與 API 可繼續使用。
+舊版人工核准由 SpiffWorkflow 執行，狀態及序列化流程一同保存。
+目前的 promotion / publish 以服務端狀態與 append-only events 追蹤；UI 顯示 stage timeline
+及 BPMN 標記，不執行部署邏輯。
 
-### `releases`
+`app/workflows/bpmn/` 保留核准、frontend / backend、Bundle 與排程定義。
+目前 `/workflows/{mode}/definition` 提供固定模式的 XML，並非任意專案的動態 BPMN 產生器。
+多元件部署的實際內容應讀取 deployment / Bundle 明細及事件。
+變更既有 BPMN element ID 前，需考慮序列化流程與前端 marker 的相容性。
 
-- 主鍵：UUID 字串 `id`。
-- 識別：`repository`、`branch`、`commit_sha`、`environment`。
-- 狀態與時間：`status`、created/updated/approved/rejected/deploy 時間。
-- 操作者：`approved_by`、`rejected_by`。
-- 備註：`message`。
-- 唯一限制：`repository + commit_sha + environment`。
+背景 worker 處理到期排程、未完成部署的持續追蹤與中斷復原，再處理通知 outbox。
+SMTP 投遞與部署 transaction 分離，通知失敗不回滾部署；outbox 具去重、claim timeout 與重試。
 
-### `release_workflows`
+## 部署邊界
 
-- `release_id` 同時是主鍵與 `releases.id` 外鍵。
-- `definition_id` 目前固定為 `release_approval`。
-- `state_json` 保存 SpiffWorkflow 完整序列化狀態。
-- 刪除 release 時 workflow 會透過 foreign key cascade 刪除。
+`Containerfile` 建置前端至 `app/static`，由 FastAPI 一併提供。
+容器啟動先執行 `alembic upgrade head`，再以單一 Uvicorn worker 監聽 `8000`。
+資料庫為 `/data/release.db`，使用持久化掛載；目前 SQLite 部署維持單一服務 instance。
 
-正式資料庫位於 container 的 `/data/release.db`。SQLite 另可能建立
-`release.db-wal` 與 `release.db-shm`，備份時不可只在服務運行中任意複製主檔；請使用
-[更新與維運](operations.md)中的 SQLite backup API 做法。
-
-## BPMN 定義
-
-v2.2 定義位於 `app/workflows/bpmn/`：`frontend_only.bpmn`、
-`backend_only.bpmn`、`release_bundle.bpmn`。穩定 stage ID 包含
-`VALIDATE_FRONTEND`、`VALIDATE_BACKEND`、`PROMOTE_BACKEND`、
-`WAIT_BACKEND_DEPLOYMENT`、`PROMOTE_FRONTEND`、`WAIT_FRONTEND_DEPLOYMENT` 與
-`COMPLETE_RELEASE`。
-
-既有 v1 定義檔是 `app/workflows/bpmn/release_approval.bpmn`，API 由
-`GET /api/v1/workflows/release-definition` 原樣提供。流程的重要 element ID 是：
-
-- `Task_approval_gate`
-- `Task_start_deployment`
-- `Task_execute_deployment`
-- `EndEvent_rejected`
-- `EndEvent_success`
-- `EndEvent_failed`
-
-修改 element ID 會影響 Python workflow service 與既有序列化 instance。變更 BPMN
-前必須設計 instance migration 或版本化 definition，不能只替換 XML。
-
-前端只讀取 BPMN 與 workflow events，不自行推算或改寫後端流程。顏色契約為：綠色
-`completed`、橘色 `current`、紅色 `failed`、灰色虛線 `cancelled`；未開始的節點維持白色。
-Bundle 與 standalone deployment 在畫面可見時每五秒 refresh，重新套用同一份事件狀態。
-
-### 通知與排程
-
-- `deployment_schedules` 保存 mode、source build、target、UTC 執行時間、原始 IANA
-  時區、收件人及觸發結果；背景 worker 到期後仍呼叫既有 `ReleaseOrchestrator`。
-- worker 會持續 refresh 由排程啟動的 deployment/bundle，直到終止狀態。
-- Email dispatcher 訂閱已持久化的 terminal/failure `workflow_events`，並先寫入
-  `email_outbox`，workflow transaction 內不會呼叫 SMTP。
-- `workflow_event_id` 唯一限制避免重複建立通知；寄送前以 `PROCESSING` claim 避免
-  worker 重複寄送，逾時 claim 可回收，失敗採 exponential retry。
-- migration 會建立 event cursor 作為通知起點，升級前的歷史 workflow events 不會在
-  SMTP 啟用後被一次補寄。
-- 新增穩定 stage ID 後，Viewer 會沿用相同 event-to-marker 映射；修改既有 ID 則需要
-  workflow definition versioning 與 migration。
-
-## 目錄
-
-```text
-app/
-  api/routes/       FastAPI endpoints
-  core/             設定與 logging
-  db/models/        SQLAlchemy models
-  schemas/          Pydantic request/response
-  services/         release 與 workflow transaction 邏輯
-  workflows/        BPMN definition
-  static/           Vite build 產物，由 FastAPI 提供
-alembic/             schema migrations
-frontend/            bpmn-js/Vite 原始碼與 smoke test
-tests/               API、workflow、health、frontend contract tests
-Containerfile        Node build stage + Python runtime stage
-```
-
-## 啟動與 Container 契約
-
-Container 啟動命令先執行 `alembic upgrade head`，成功後啟動單一 Uvicorn worker：
-
-```text
-container port: 8000
-health endpoint: /health
-database URL: sqlite:////data/release.db
-persistent directory: /data
-```
-
-單一 container/worker 是目前 SQLite 架構的預期部署。要水平擴充多 instance 時，應先
-改用具備並行與共享儲存能力的資料庫，並重新檢視 workflow locking。
-
-## 設計邊界
-
-- Release Controller 記錄部署流程，不負責執行任意 shell command。
-- 實際 build/deploy/health check 應由 Drone 或受控 deployment executor 執行。
-- 前端目前是操作與監控介面，不是 BPMN editor。
-- authentication、authorization、webhook 驗章與 audit log 尚未實作。
+Controller 自身由 Drone + Portainer 部署；下游元件由各自 Drone pipeline 部署。
+`/health` 只檢查本服務與資料庫，Connections / 專案驗證才檢查實際上游設定。
+登入與權限限制見[安全指南](security.md)，備份見[更新與維運](operations.md)。

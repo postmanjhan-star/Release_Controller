@@ -1,74 +1,58 @@
-# 測試圍欄與品質閘門
+# 品質檢查
 
-這個專案把品質檢查分成快速靜態檢查、隔離測試、production build 與瀏覽器 E2E。任何一層失敗都應阻擋合併。
+命令定義以 [`devtools/cli.py`](../devtools/cli.py) 與
+[`frontend/package.json`](../frontend/package.json) 為準。
 
-## Python gate
+## Python
 
-```powershell
+首次執行需先建置前端，`tests/test_frontend.py` 會檢查實際的 `app/static` 資源：
+
+```sh
 uv sync
-Set-Location frontend
+cd frontend
 npm ci
 npm run build
-Set-Location ..
+cd ..
 uv run quality
 ```
 
-- Ruff 檢查錯誤、未使用名稱、imports、bugbear 與 Python 3.10 modern syntax。
-- Ruff formatter 確保 `app`、`tests`、`alembic` 格式一致。
-- pytest 使用 temporary SQLite fixture，不碰正式資料庫。
-- `tests/test_frontend.py` 會驗證實際的首頁與靜態資源，執行前必須先建置前端。
-  `app/static` 是未納入版本控制的產物，乾淨 checkout 不會包含它；前端來源變更後也需重新建置。
-- coverage 啟用 branch coverage，總門檻為 85%。
-- Drone/Gitea client tests mock `httpx`，驗證成功 payload、timeout、連線與 HTTP 錯誤分類。
+- `uv run lint`：Ruff lint 與格式檢查，涵蓋 `app`、`tests`、`alembic`、`devtools`。
+- `uv run test`：完整 pytest 與 coverage；可接測試路徑，例如 `uv run test tests/test_api.py`。
+- `uv run quality`：上述靜態檢查與完整測試。
 
-## Frontend gate
+Coverage 啟用 branch coverage，總門檻為 **85%**，設定在 `pyproject.toml`。
+測試使用暫存 SQLite 及模擬 Drone / Gitea，不操作正式資料。
 
-```powershell
-Set-Location frontend
-npm ci
-npm run quality
-```
+## 前端
 
-`quality` 依序執行：
+在 `frontend` 目錄執行 `npm run quality`，依序完成：
 
-1. `tsc --noEmit`：TypeScript strict 型別檢查。
-2. ESLint：React hooks、TypeScript 與一般程式錯誤。
-3. Prettier check：防止未格式化程式進入 repository。
-4. Vitest + React Testing Library：測試 React shell、共用 component 與 typed API client。
-5. UI contract：保護 API paths、BPMN markers、navigation 與獨立 build selection。
-6. Vite production build。
-7. Production smoke：確認 FastAPI static index 引用的 assets 真的存在且包含必要 UI。
+1. TypeScript 型別檢查、ESLint 與 Prettier check。
+2. Vitest / React Testing Library 測試及 UI contract。
+3. Vite build 與產物 smoke check。
 
-Vitest coverage 目前涵蓋 React shell 與 typed API layer，statements/functions/lines 門檻 85%、branches 80%。legacy controller 由 TypeScript、ESLint、contract 與 Playwright 保護，之後搬入 hooks 時要同步納入 unit coverage。
+Coverage 涵蓋 React、API、登入狀態與 controller 等 `src` 程式；排除測試檔、型別定義
+`domain.ts` 與入口 `main.tsx`。目前整體門檻為 statements **75%**、branches **60%**、
+functions **82%**、lines **80%**，以 `frontend/vite.config.ts` 為準。
 
-## Browser E2E
+## 瀏覽器 E2E
 
-第一次執行先安裝瀏覽器：
+在 `frontend` 目錄執行：
 
-```powershell
-Set-Location frontend
+```sh
 npx playwright install chromium
 npm run test:e2e
 ```
 
-Playwright 會自動啟動 Vite，並 mock Drone/Gitea/API 回應，因此不需要 token，也不會建立或刪除 release。測試驗證：
+Playwright 會啟動 Vite 並模擬 API，驗證 build 選取、操作按鈕、頁籤與 URL navigation。
+`npm run quality:ci` 包含前端 quality 與 E2E；失敗時的 trace、截圖位於 `test-results`。
 
-- Frontend/Backend builds 能載入。
-- runtime target 能寫入表單。
-- combined release button 在選取完成後啟用。
-- service health 顯示正常。
-- history navigation 更新畫面和 `aria-current`，且不重新載入整頁。
+## CI 與修改要求
 
-## Drone
+Drone 的順序為 `frontend-quality → python-quality → browser-e2e`。
+Push / pull request 會觸發 quality，但排除 `deploy` 分支；只有 `main` push 通過後才接續
+Portainer 部署。詳細流程見 [CI/CD](cicd.md)。
 
-根目錄 `.drone.yml` 的 `quality` Docker pipeline 會在所有 push 與 pull request 執行上述
-gate，透過 `depends_on` 明確指定 `frontend-quality → python-quality → browser-e2e`。
-`frontend-quality` 的 `npm run quality` 會在共用 workspace 產生 `app/static`，Python container
-才能驗證首頁與資源；不可將 Python 測試提前到前端建置之前。
-
-`main` push 的 gate 通過後，才會接續由 Docker runner 透過 SSH 執行 `deploy` pipeline；
-設定方式見[自動 CI/CD](cicd.md)。第一次 Drone build 完成後，Repository 管理者仍需到
-Gitea branch protection，把 Drone 回報的 quality commit status 設為 required status check。
-
-若 runner 無法下載 Python、Node 或 Playwright images，需由管理者設定 registry mirror／
-網路代理，或將 `.drone.yml` 的 image 改成已同步到內部 registry 的對應版本。
+依專案協作規範：文件變更也需執行 `uv run test`；Python 變更跑 `uv run quality`；
+前端變更跑 `npm run quality`，操作流程變更另跑 E2E。完成前檢查 `git diff --check` 與
+`git status --short`。測試數量與實際 coverage 以當次執行結果為準。

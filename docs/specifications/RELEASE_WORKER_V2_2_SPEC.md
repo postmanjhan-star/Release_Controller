@@ -1,5 +1,8 @@
 # Release Worker v2.2 規格
 
+> 歷史版本規格：保留原始需求與設計，部分流程與部署方式已變更。
+> 目前操作以[文件索引](../README.md)、[API 指南](../api-guide.md)及[部署設定](../deployment.md)為準。
+
 > Version: **2.2**
 >
 > Upgrade path: **v1 → v2.2 directly**

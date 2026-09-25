@@ -1,161 +1,75 @@
 # 更新與維運
 
-## 排程與 SMTP worker
+部署由 Drone 更新 `deploy` 分支，再透過 Portainer 重建服務。
+初次設定見[部署設定](deployment.md)，pipeline 與 secrets 見 [CI/CD](cicd.md)。
+以下 Docker 指令需在實際容器主機執行；亦可從 Portainer 查看狀態及 log。
 
-正式環境先執行 `alembic upgrade head`，再設定 `BACKGROUND_WORKER_ENABLED=true`。
-SQLite 部署只啟動一個 Uvicorn worker；排程和 SMTP dispatcher 與 API 共用同一資料庫。
-SMTP 至少需設定 `SMTP_HOST` 與 `SMTP_FROM_ADDRESS`。通知名單可由 UI 的
-`Email recipients` 或 `/api/v1/notifications/recipients` 管理；目標為
-`SMTP_MANAGED_RECIPIENT_TARGETS`（預設 `production`）的排程，會通知名單中每個地址，
-並合併個別排程填寫的額外收件人。建立正式站排程時會先寄出排程通知，部署的完成或失敗
-workflow event 會再寄出結果通知。`SMTP_DEFAULT_RECIPIENTS` 則是其他 workflow event
-沒有專屬收件人時的 fallback。587/STARTTLS 是預設值；implicit TLS 請設 `SMTP_SSL=true` 並關閉
-`SMTP_STARTTLS`。密碼只放 server env file。
-TLS 憑證預設會驗證；內部 CA 可用 `SMTP_TLS_CA_FILE` 指向 container 內的 PEM bundle。
-`SMTP_TLS_VERIFY=false` 只能作為短期診斷手段，不應成為正式設定。
+## 更新版本
 
-寄送失敗可由 `GET /api/v1/notifications/outbox` 查看 `attempts`、`next_attempt_at` 與
-`last_error`。worker 會依 `SMTP_RETRY_SECONDS` 指數退避，最多嘗試
-`SMTP_MAX_ATTEMPTS` 次；不會因 SMTP 不可用而回滾部署 workflow。
-升級 migration 會把當下位置寫入 notification cursor，因此只寄送升級後的新事件。
+1. 完成[品質檢查](quality-gates.md)，更新 `pyproject.toml` 版本與 `uv.lock`。
+2. 部署前備份 SQLite 及安全保存的 runtime 設定、`APP_SECRET_KEY`。
+3. 提交並合併至 `main`，觀察 quality、deploy 與 tag 觸發的 release pipeline。
+4. 確認 `/health`、登入、既有專案與歷程，以及預期的版本已上線。
 
-## 建議發版流程
-
-1. 本機完成程式修改、前端 build 與測試。
-2. commit 並 push 到 Gitea；正式版本建議建立 immutable Git tag。
-3. VM 在固定 source 目錄執行 `git pull --ff-only`。
-4. 部署前備份 SQLite。
-5. 使用既有部署腳本 build、替換 container、執行 health check。
-6. 確認 UI、API、log 與資料仍正常。
-
-## 本機準備更新
-
-```powershell
-Set-Location frontend
-npm run build
-Set-Location ..
-
-uv run test
-git status --short
-git diff --check
-git add <本次變更檔案>
-git commit -m "feat: describe the change"
-git push origin main
-```
-
-請只提交本次變更，不要把 `.env`、database 或 VM secret 放進 Git。正式發版可加 tag：
+目前 pipeline 不會自動備份或自動回滾。容器啟動會先執行 migration；不要只替換前端資源，
+也不要在部署成功前手動建立發版 tag。
 
 ```bash
-git tag -a v1.1.0 -m "Release v1.1.0"
-git push origin v1.1.0
-```
-
-## VM 更新
-
-先確認沒有 VM 上未提交的修改：
-
-```bash
-cd "$HOME/services/release-controller-src"
-git status --short
-git fetch --tags origin
-git checkout main
-git pull --ff-only origin main
-git log -1 --oneline
-```
-
-若 `git status` 不乾淨，先釐清檔案來源，不要用 `git reset --hard` 隨意覆蓋。
-
-備份完成後執行：
-
-```bash
-bash ./scripts/deploy-release-controller.sh "$PWD"
+docker ps --filter name=release-controller
+docker logs --since 10m release-controller
 curl -fsS http://127.0.0.1:3100/health
-podman logs --tail 100 release-controller
 ```
 
-若 VM 沒有部署腳本，依 [Podman 部署](podman-deployment.md)的手動流程操作，並替每次
-build 使用版本 tag，而不只覆寫 `latest`：
+URL 請換成實際綁定位址。`/health` 只驗證應用程式與資料庫，不代表上游服務或所有業務操作正常。
 
-```bash
-VERSION="$(git describe --tags --always --dirty)"
-podman build -f Containerfile -t "localhost/release-controller:$VERSION" .
-podman tag "localhost/release-controller:$VERSION" localhost/release-controller:latest
-```
+## 背景工作與通知
 
-## 健康與診斷
+設定 `BACKGROUND_WORKER_ENABLED=true` 後，worker 處理到期排程、未完成部署的追蹤與復原、
+通知 outbox。SQLite 架構維持單一服務 instance / worker。
 
-```bash
-curl -fsS http://127.0.0.1:3100/health
-podman ps --filter name=release-controller
-podman logs --since 10m release-controller
-podman stats --no-stream release-controller
-podman inspect release-controller
-podman system df
-```
+| 設定 | 用途 |
+| --- | --- |
+| `SMTP_HOST`、`SMTP_PORT`、`SMTP_FROM_ADDRESS` | 郵件伺服器與寄件者；host 留空時不寄送 |
+| `SMTP_USERNAME`、`SMTP_PASSWORD` | SMTP 驗證，依伺服器需求設定 |
+| `SMTP_STARTTLS` / `SMTP_SSL` | 使用 implicit TLS 時設 `SMTP_SSL=true`、`SMTP_STARTTLS=false` |
+| `SMTP_TLS_VERIFY` | 正式環境設為 `true`；範例檔的開發值需調整 |
+| `SMTP_TLS_CA_FILE` | 使用內部 CA 時，指定已掛載至容器的 PEM 檔案 |
+| `SMTP_DEFAULT_RECIPIENTS` | Workflow 通知沒有專屬收件人時的 fallback |
+| `SMTP_MANAGED_RECIPIENT_TARGETS` | 使用共用名單的排程目標，預設 `production` |
+| `NOTIFICATION_ATTACHMENT_MAX_BYTES` | 附件上限，預設 10 MiB |
 
-正常 `/health` 回 HTTP 200 且 database=`ok`。HTTP 503 表示 process 可回應，但 SQLite
-不可用；connection refused 則代表 container 未啟動、port 未 publish 或 process 已退出。
+共用名單在 **Email recipients** 管理，並與適用排程的額外收件人合併。
+排程建立及流程終態會依設定產生通知；寄送失敗不回滾部署。
+`GET /api/v1/notifications/outbox` 可查看 attempts、next_attempt_at 與 last_error，需登入。
+重試受 `SMTP_MAX_ATTEMPTS`、`SMTP_RETRY_SECONDS` 與 claim timeout 控制。
 
 ## SQLite 備份
 
-建議每次部署前備份，並定期把備份複製到 VM 之外。服務運行時使用 SQLite backup
-API，可取得一致性 snapshot：
+運行中的 SQLite 可能有 WAL，請用 backup API 取得一致快照，不直接複製主檔：
 
 ```bash
-BACKUP="/data/release-$(date +%Y%m%d-%H%M%S).db"
-podman exec --env BACKUP="$BACKUP" release-controller python -c \
-  "import os, sqlite3; src=sqlite3.connect('/data/release.db'); dst=sqlite3.connect(os.environ['BACKUP']); src.backup(dst); dst.close(); src.close()"
-
-ls -lh "$HOME/services/release-controller/data"/release-*.db
+BACKUP_NAME="release-$(date +%Y%m%d-%H%M%S).db"
+docker exec --env BACKUP_PATH="/data/$BACKUP_NAME" release-controller python -c \
+  'import os, sqlite3; src=sqlite3.connect("/data/release.db"); dst=sqlite3.connect(os.environ["BACKUP_PATH"]); src.backup(dst); dst.close(); src.close()'
+mkdir -p backups
+docker cp "release-controller:/data/$BACKUP_NAME" "backups/$BACKUP_NAME"
 ```
 
-備份 retention 例：至少保留最近 7 份與每週 4 份，實際依公司 RPO/RTO 制定。定期在
-隔離環境做還原演練，只有產生檔案但未驗證的備份不算可用備份。
+備份包含歷程、登入 session 與通知附件。將副本保存到另一個儲存位置，限制存取，並定期在
+隔離環境驗證還原。`APP_SECRET_KEY` 需另外安全備份；沒有原 key 就無法解開既有連線 token。
 
-## 還原資料庫
+## 還原與回滾
 
-還原會中斷服務。先確認備份檔與目標路徑，再執行：
+1. 確認部署版本、備份時間及 Portainer Stack 實際掛載的 `DATA_DIR`。
+2. 保留當前一致性備份，停止服務，避免背景 worker 在還原期間執行。
+3. 使用經驗證的資料庫備份取代 `/data/release.db`；只在服務已停止且舊資料已保存後，
+   移除該資料庫殘留的 `release.db-wal` 與 `release.db-shm`，避免混用不同快照。
+4. 確認檔案 owner / 權限與原掛載一致，以相容版本啟動，再查 `/health`、登入與歷程。
+5. 恢復背景工作前，確認排程、未完成部署及 outbox，避免舊快照重送已完成的工作。
 
-```bash
-DATA="$HOME/services/release-controller/data"
-BACKUP="$DATA/release-YYYYMMDD-HHMMSS.db"
+應用程式回滾優先採用 revert commit、遞增版本後重新走 CI。
+若需緊急改用舊版 image / Git ref，由維運人員在 Portainer 操作並確認 schema 相容性；
+換回舊程式不會自動還原資料庫。不要覆寫既有版本 tag 或任意執行 Alembic downgrade。
 
-test -f "$BACKUP"
-podman stop release-controller
-cp "$DATA/release.db" "$DATA/release-before-restore-$(date +%Y%m%d-%H%M%S).db"
-cp "$BACKUP" "$DATA/release.db"
-rm -f "$DATA/release.db-wal" "$DATA/release.db-shm"
-podman start release-controller
-curl -fsS http://127.0.0.1:3100/health
-```
-
-`rm` 只可針對上面已確認的固定 data 目錄與兩個 sidecar 檔。若不確定路徑，停止並請
-維運人員檢查，不要以 wildcard 刪除。
-
-## Application rollback
-
-Application rollback 與 database rollback 是兩件事：
-
-1. 找出上一個已驗證 image：`podman images localhost/release-controller`。
-2. 停止並移除目前 container，但保留 `/data`。
-3. 以完全相同的 network、port、volume、env 啟動上一版 image。
-4. 執行 `/health` 與 UI smoke check。
-
-若新版已執行無法向後相容的 migration，舊 image 可能不能讀取新 schema。此時應使用
-預先測試的 downgrade，或把「部署前資料庫備份」與舊 image 一起還原。任何 destructive
-migration 都應在維護窗口執行，不能假設換回 image 就會還原 schema。
-
-## Reboot 後自動啟動
-
-`--restart unless-stopped` 可處理 process/container restart，但 rootless Podman 在 VM reboot
-後是否自動啟動仍取決於使用者 service 與 linger。正式環境建議由維運人員依 VM 的
-Podman 版本產生 systemd/Quadlet 設定，啟用 user service，並測試完整 reboot。
-
-## 上線後檢核
-
-- `/health` 回 200。
-- 首頁可載入，BPMN 圖不是空白。
-- 既有 release 仍可查詢。
-- 建立測試 release 後可看到 `Approval gate`。
-- `podman logs` 沒有 migration、permission 或 Python exception。
-- 備份檔可在隔離環境開啟，並且不只存在同一顆 VM 磁碟。
+Portainer 呼叫後失敗時，`deploy` 分支可能已更新，但服務未必成功替換。
+先確認實際容器版本與 log，再修復或回滾；不能只看 Git ref 判斷上線結果。

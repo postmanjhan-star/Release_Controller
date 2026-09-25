@@ -1,5 +1,8 @@
 # 前端效能審查：Vercel React Best Practices 全面對照
 
+> 歷史審查紀錄：保留當時的分析、進度與量測，不代表目前版本的完整狀態。
+> 現行程式結構與驗證方式請見[系統架構](architecture.md)及[品質檢查](quality-gates.md)。
+
 審查對象：`frontend/src/`（React 19.1.1 + Vite 8 + Redux Toolkit 2.12，SPA）
 審查基準：Vercel React Best Practices，8 大類共 70 條
 日期：2026-09-04
