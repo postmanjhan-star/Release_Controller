@@ -77,6 +77,10 @@ class DroneBuildService:
         except DroneNotFoundError as exc:
             raise BuildNotFoundError from exc
 
+    def get_step_logs(self, component: ProjectComponent, build: int, stage: int, step: int) -> str:
+        repo = DroneRepository.of(component)
+        return self.client_for(component).get_step_logs(repo.owner, repo.name, build, stage, step)
+
     def validate_promotable(self, component: ProjectComponent, build_number: int) -> DroneBuild:
         build = self.get_build(component, build_number)
         if not build.is_promotable():

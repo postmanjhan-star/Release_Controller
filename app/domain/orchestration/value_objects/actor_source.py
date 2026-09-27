@@ -10,3 +10,4 @@ class ActorSource(str, enum.Enum):
     SESSION = "session"
     SCHEDULE = "schedule"
     SYSTEM = "system"
+    MCP = "mcp"

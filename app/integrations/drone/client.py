@@ -74,6 +74,16 @@ class DroneClient:
             raise DroneUnexpectedResponseError("Drone returned an invalid build")
         return DroneBuild.from_drone(payload)
 
+    def get_step_logs(self, owner: str, repo: str, build: int, stage: int, step: int) -> str:
+        payload = self._read(
+            "GET",
+            f"/api/repos/{owner}/{repo}/builds/{build}/logs/{stage}/{step}",
+            description="get_step_logs",
+        )
+        if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
+            raise DroneUnexpectedResponseError("Drone returned invalid logs")
+        return "".join(str(row.get("out", "")) for row in payload)
+
     def promote_build(self, owner: str, repo: str, build_number: int, target: str) -> DroneBuild:
         """Create a promotion build.  Never retried: this call is not idempotent.
 

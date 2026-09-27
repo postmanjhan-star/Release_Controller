@@ -10,3 +10,4 @@ SpiffWorkflow==3.1.2
 pytest==8.4.1
 httpx==0.28.1
 tzdata==2025.2
+mcp==1.26.0

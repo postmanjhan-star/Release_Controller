@@ -8,6 +8,7 @@ from app.api.routes import (
     notifications,
     projects,
     publishes,
+    release_plans,
     releases,
     schedules,
     workflows,
@@ -16,6 +17,7 @@ from app.infrastructure.di.injection import require_user
 
 api_router = APIRouter(dependencies=[Depends(require_user)])
 api_router.include_router(workflows.router)
+api_router.include_router(release_plans.router)
 api_router.include_router(drone.router)
 api_router.include_router(gitea.router)
 api_router.include_router(connections.router)

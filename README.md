@@ -84,3 +84,10 @@ Portainer 使用 [`compose.portainer.yml`](compose.portainer.yml) 與 [`Containe
 - [環境設定範例](.env.example)與[疑難排解](docs/troubleshooting.md)
 - [Portainer 部署設定](docs/deployment.md)、[CI/CD](docs/cicd.md)與[更新維運](docs/operations.md)
 - [完整文件索引](docs/README.md)
+
+## MCP release operations
+
+See [MCP setup and security model](docs/mcp.md) for the optional MCP process.
+`create_release_plan` never deploys; `promote_to_production` executes only an exact,
+unexpired plan approved by an authenticated administrator outside MCP.
+The default mode is `readonly`; the MCP service is opt-in.

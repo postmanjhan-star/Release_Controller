@@ -29,6 +29,6 @@ COPY --from=frontend-builder /app/static ./app/static
 
 RUN mkdir -p /data
 
-EXPOSE 8000
+EXPOSE 8000 8001
 
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]

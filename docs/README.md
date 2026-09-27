@@ -24,3 +24,5 @@
 - [版本規格](specifications/README.md)
 - [後端架構審查](backend-ddd-review.md)
 - [前端效能審查](frontend-performance-review.md)
+
+- [MCP release operations](mcp.md)：Agent 查詢、release plan、人工審批與受控部署。

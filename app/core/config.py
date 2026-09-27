@@ -1,10 +1,25 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    mcp_enabled: bool = False
+    mcp_mode: Literal["readonly", "staging", "full"] = "readonly"
+    mcp_api_token: str = ""
+    mcp_transport: Literal["stdio", "streamable-http"] = "stdio"
+    mcp_host: str = "127.0.0.1"
+    mcp_allowed_hosts: str = "localhost:*,127.0.0.1:*"
+    mcp_port: int = Field(default=8001, ge=1, le=65535)
+    mcp_max_log_length: int = Field(default=10000, ge=1, le=100000)
+    mcp_audit_enabled: bool = True
+    mcp_project: str = "default"
+    mcp_actor: str = Field(default="mcp-agent", min_length=1, max_length=100)
+    mcp_staging_target: str = Field(default="staging", min_length=1, max_length=100)
+    mcp_production_target: str = Field(default="production", min_length=1, max_length=100)
+    mcp_plan_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
     app_name: str = "release-controller"
     app_env: str = "production"
     log_level: str = "INFO"
@@ -76,6 +91,19 @@ class Settings(BaseSettings):
     notification_attachment_max_bytes: int = Field(
         default=10 * 1024 * 1024, ge=1, le=25 * 1024 * 1024
     )
+
+    @model_validator(mode="after")
+    def validate_mcp(self) -> "Settings":
+        if self.mcp_enabled:
+            if not self.mcp_audit_enabled:
+                raise ValueError("MCP requires audit logging in every mode")
+            if self.mcp_transport == "streamable-http" and len(self.mcp_api_token.strip()) < 32:
+                raise ValueError("MCP HTTP requires MCP_API_TOKEN with at least 32 characters")
+            if self.mcp_staging_target.casefold() == self.mcp_production_target.casefold():
+                raise ValueError("MCP staging and production targets must differ")
+            if self.mcp_staging_target.casefold() in {"prod", "production"}:
+                raise ValueError("MCP staging target must not name production")
+        return self
 
     @model_validator(mode="after")
     def refuse_unauthenticated_production(self) -> "Settings":

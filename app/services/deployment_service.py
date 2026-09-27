@@ -31,7 +31,9 @@ from app.integrations.drone.exceptions import (
 )
 from app.integrations.drone.schemas import DroneBuild
 from app.services.component_registry import ComponentRegistry
-from app.services.drone_build_service import DroneBuildService
+from app.services.drone_build_service import BuildNotPromotableError, DroneBuildService
+from app.services.planned_deployment_guard import verify_planned_deployment
+from app.services.release_operations_errors import MCPToolError
 from app.services.workflow_service import OrchestrationWorkflowService
 
 logger = logging.getLogger(__name__)
@@ -266,9 +268,20 @@ class DeploymentService:
             return deployment
 
         try:
+            verify_planned_deployment(self.db, self.settings, self.builds, deployment, component)
             promotion = self.builds.promote(
                 component, deployment.source_build_number, deployment.target
             )
+        except (MCPToolError, BuildNotPromotableError):
+            self.fail(
+                deployment,
+                failed_stage=stage,
+                error_code="APPROVED_PLAN_CHANGED",
+                error_message="Approved plan no longer matches deployment state.",
+                release=release,
+            )
+            self.db.commit()
+            return deployment
         except DroneError as exc:
             if exc.error_code in UNCONFIRMED_PROMOTE_ERROR_CODES:
                 # The request may well have reached Drone.  Marking this FAILED

@@ -2,8 +2,9 @@ services:
   release-controller:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
 
+    image: ${RELEASE_CONTROLLER_IMAGE:-release-controller:local}
     container_name: release-controller
     restart: unless-stopped
 
@@ -13,8 +14,11 @@ services:
     volumes:
       - /volume1/docker/release-controller/data:/data
 
-    environment:
+    environment: &release-environment
       DATABASE_URL: sqlite:////data/release.db
+      MCP_PROJECT: ${MCP_PROJECT:-default}
+      MCP_STAGING_TARGET: ${MCP_STAGING_TARGET:-staging}
+      MCP_PRODUCTION_TARGET: ${MCP_PRODUCTION_TARGET:-production}
 
       APP_ENV: ${APP_ENV:-production}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
@@ -43,3 +47,38 @@ services:
       SMTP_DEFAULT_RECIPIENTS: ${SMTP_DEFAULT_RECIPIENTS:-}
 
       BACKGROUND_WORKER_ENABLED: ${BACKGROUND_WORKER_ENABLED:-true}
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  release-controller-mcp:
+    image: ${RELEASE_CONTROLLER_IMAGE:-release-controller:local}
+    profiles: ["mcp"]
+    container_name: release-controller-mcp
+    command: ["python", "-m", "app.mcp.server"]
+    restart: unless-stopped
+    depends_on:
+      release-controller:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8001}:8001"
+    volumes:
+      - /volume1/docker/release-controller/data:/data
+    environment:
+      <<: *release-environment
+      MCP_ENABLED: "true"
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8001"
+      MCP_MODE: ${MCP_MODE:-readonly}
+      MCP_API_TOKEN: ${MCP_API_TOKEN:-}
+      MCP_PROJECT: ${MCP_PROJECT:-default}
+      MCP_STAGING_TARGET: ${MCP_STAGING_TARGET:-staging}
+      MCP_PRODUCTION_TARGET: ${MCP_PRODUCTION_TARGET:-production}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-localhost:*,127.0.0.1:*}
+      MCP_AUDIT_ENABLED: "true"
+      BACKGROUND_WORKER_ENABLED: "false"

@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Containerfile
 
+    image: ${RELEASE_CONTROLLER_IMAGE:-release-controller:local}
     container_name: release-controller
     restart: unless-stopped
 
@@ -33,3 +34,29 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+
+  release-controller-mcp:
+    image: ${RELEASE_CONTROLLER_IMAGE:-release-controller:local}
+    profiles: ["mcp"]
+    container_name: release-controller-mcp
+    command: ["python", "-m", "app.mcp.server"]
+    restart: unless-stopped
+    depends_on:
+      release-controller:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8001}:8001"
+    volumes:
+      - "${DATA_DIR:-./data}:/data"
+    env_file:
+      - stack.env
+    environment:
+      DATABASE_URL: sqlite:////data/release.db
+      MCP_ENABLED: "true"
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8001"
+      MCP_MODE: ${MCP_MODE:-readonly}
+      MCP_AUDIT_ENABLED: "true"
+      BACKGROUND_WORKER_ENABLED: "false"

@@ -31,7 +31,7 @@ from app.services.deployment_service import (
     DeploymentService,
     DuplicatePromotionError,
 )
-from app.services.drone_build_service import DroneBuildService
+from app.services.drone_build_service import BuildNotPromotableError, DroneBuildService
 from app.services.workflow_service import OrchestrationWorkflowService
 
 logger = logging.getLogger(__name__)
@@ -129,7 +129,13 @@ class ReleaseOrchestrator:
         return self.deployments.get(deployment.id)
 
     def create_bundle(
-        self, payload: BundlePromoteRequest, *, attachment: UploadedAttachment | None = None
+        self,
+        payload: BundlePromoteRequest,
+        *,
+        attachment: UploadedAttachment | None = None,
+        bundle_id: str | None = None,
+        expected_commits: dict[str, str] | None = None,
+        required_target: str | None = None,
     ) -> ReleaseBundle:
         """Start a release covering the components the caller selected.
 
@@ -145,6 +151,15 @@ class ReleaseOrchestrator:
         validated: list[tuple[ProjectComponent, DroneBuild]] = []
         for component, build_number in selection:
             build = self.builds.validate_promotable(component, build_number)
+            if (
+                expected_commits is not None
+                and expected_commits.get(component.key) != build.commit_sha
+            ):
+                raise BuildNotPromotableError("Source commit no longer matches the release plan")
+            if required_target is not None and _target_for(component, target) != required_target:
+                raise ComponentNotSelectableError(
+                    "Effective target no longer matches the release plan"
+                )
             self.deployments.assert_not_duplicate(
                 component, build.number, _target_for(component, target)
             )
@@ -152,6 +167,7 @@ class ReleaseOrchestrator:
 
         now = utc_now()
         bundle = ReleaseBundle(
+            id=bundle_id or str(uuid.uuid4()),
             project_id=project.id,
             mode=ReleaseMode.BUNDLE.value,
             selected_component_keys=",".join(component.key for component, _ in validated),

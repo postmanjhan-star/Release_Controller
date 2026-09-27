@@ -20,6 +20,20 @@ def _drone_datetime(value: Any) -> datetime | None:
     )
 
 
+class DroneStep(BaseModel):
+    number: int
+    name: str = ""
+    status: str = ""
+    exit_code: int | None = None
+
+
+class DroneStage(BaseModel):
+    number: int
+    name: str = ""
+    status: str = ""
+    steps: list[DroneStep] = Field(default_factory=list)
+
+
 class DroneBuild(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -35,6 +49,9 @@ class DroneBuild(BaseModel):
     commit_message: str = ""
     author: str = ""
     created_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    stages: list[DroneStage] = Field(default_factory=list)
 
     @classmethod
     def from_drone(cls, payload: dict[str, Any]) -> "DroneBuild":
@@ -55,6 +72,9 @@ class DroneBuild(BaseModel):
             commit_message=payload.get("message") or payload.get("commit_message") or "",
             author=payload.get("author_name") or payload.get("author") or "",
             created_at=_drone_datetime(payload.get("created") or payload.get("created_at")),
+            started_at=_drone_datetime(payload.get("started")),
+            finished_at=_drone_datetime(payload.get("finished")),
+            stages=payload.get("stages") or [],
         )
 
     def is_promotable(self) -> bool:

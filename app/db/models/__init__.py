@@ -6,6 +6,7 @@ Alembic 透過 `from app.db import models` 匯入這裡註冊 Base.metadata，
 """
 
 from app.db.models.auth import AuthSession, OAuthLoginAttempt
+from app.db.models.mcp import MCPToolInvocation, ReleasePlan
 from app.db.models.orchestration import (
     Deployment,
     PublishRecord,
@@ -25,6 +26,8 @@ from app.db.models.workflow import ReleaseWorkflow
 
 __all__ = [
     "AuthSession",
+    "MCPToolInvocation",
+    "ReleasePlan",
     "Deployment",
     "DeploymentSchedule",
     "EmailNotificationCursor",
