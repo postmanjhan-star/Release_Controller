@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
+from app.domain.shared.time import utc_now
 
 router = APIRouter(tags=["health"])
 
@@ -23,6 +24,12 @@ def health(
                 "status": "error",
                 "service": settings.app_name,
                 "database": "unavailable",
+                "time": utc_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
             },
         )
-    return {"status": "ok", "service": settings.app_name, "database": "ok"}
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "database": "ok",
+        "time": utc_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }

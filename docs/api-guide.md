@@ -15,6 +15,22 @@ Base path 為 `/api/v1`。完整欄位與回應以執行中服務的 `/docs`、`
 本機 curl 測試可使用 `APP_ENV=development`、`AUTH_ENABLED=false`；正式環境不可停用驗證。
 啟用驗證時，核准、拒絕與部署請求的操作者由 session 決定，不能藉由 body 偽造。
 
+## 健康檢查
+
+`GET /health` 檢查本服務與資料庫。成功時回傳 HTTP 200：
+
+```json
+{
+  "status": "ok",
+  "service": "release-controller",
+  "database": "ok",
+  "time": "2026-10-21T07:49:19Z"
+}
+```
+
+`time` 為本次檢查完成時的 UTC 時間，採 RFC 3339 格式，精確到秒，以 `Z` 結尾。
+資料庫無法使用時回傳 HTTP 503，`status` 為 `error`、`database` 為 `unavailable`，仍包含 `time`。
+
 ## 常用端點
 
 下表路徑均省略 `/api/v1`：
