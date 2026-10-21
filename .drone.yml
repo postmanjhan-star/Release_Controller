@@ -59,7 +59,7 @@ platform:
   arch: amd64
 
 clone:
-  depth: 1
+  depth: 0
 
 depends_on:
   - quality
