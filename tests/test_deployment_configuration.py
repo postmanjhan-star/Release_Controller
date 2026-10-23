@@ -77,18 +77,19 @@ def test_full_ci_covers_main_prs_and_explicit_runs_before_deployment() -> None:
 
 
 @pytest.mark.parametrize("pipeline_name", ["fast-quality", "quality"])
-def test_python_ci_preserves_sqlite_semantics_and_reports_stalls(pipeline_name: str) -> None:
+def test_python_ci_supports_untrusted_repositories_and_reports_stalls(pipeline_name: str) -> None:
     pipeline = _pipeline(pipeline_name)
     python = _step(pipeline, "python-quality")
-    assert "- name: pytest-tmp\n        path: /tmp/pytest" in python
-    assert "volumes:\n  - name: pytest-tmp\n    temp:\n      medium: memory" in pipeline
+    # All temporary data stays in the container; no trusted mount is required.
+    assert "volumes:" not in pipeline
+    assert "privileged:" not in pipeline
     assert 'PYTHONUNBUFFERED: "1"' in python
     command = next(line for line in python.splitlines() if "python -m pytest " in line).split(
         "python -m pytest ", 1
     )[1]
     for option in (
         "-vv",
-        "--basetemp=/tmp/pytest/run",
+        "--basetemp=/tmp/pytest-run",
         "--durations=30",
         "-o faulthandler_timeout=120",
         "--junitxml=test-results/pytest.xml",

@@ -26,21 +26,12 @@ steps:
       APP_ENV: test
       BACKGROUND_WORKER_ENABLED: "false"
       PYTHONUNBUFFERED: "1"
-    volumes:
-      - name: pytest-tmp
-        path: /tmp/pytest
     commands:
       - python -m pip install --no-cache-dir -r requirements-dev.txt
       - python -m ruff check app tests alembic devtools
       - python -m ruff format --check app tests alembic devtools
       # Keep every Python test, including MCP, permissions and recovery.
-      - python -m pytest -vv --basetemp=/tmp/pytest/run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
-
-# Keep file-backed SQLite semantics without NAS fsync latency for disposable data.
-volumes:
-  - name: pytest-tmp
-    temp:
-      medium: memory
+      - python -m pytest -vv --basetemp=/tmp/pytest-run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
 
 trigger:
   branch:
@@ -80,14 +71,11 @@ steps:
       APP_ENV: test
       BACKGROUND_WORKER_ENABLED: "false"
       PYTHONUNBUFFERED: "1"
-    volumes:
-      - name: pytest-tmp
-        path: /tmp/pytest
     commands:
       - python -m pip install --no-cache-dir -r requirements-dev.txt
       - python -m ruff check app tests alembic devtools
       - python -m ruff format --check app tests alembic devtools
-      - python -m pytest --cov=app --cov-report=term-missing --cov-report=xml -vv --basetemp=/tmp/pytest/run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
+      - python -m pytest --cov=app --cov-report=term-missing --cov-report=xml -vv --basetemp=/tmp/pytest-run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
 
   - name: browser-e2e
     image: mcr.microsoft.com/playwright:v1.62.1-noble
@@ -98,11 +86,6 @@ steps:
     commands:
       - cd frontend
       - npm run test:e2e -- --workers=1
-
-volumes:
-  - name: pytest-tmp
-    temp:
-      medium: memory
 
 trigger:
   branch:

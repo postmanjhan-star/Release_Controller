@@ -25,10 +25,12 @@ NAS 上的同時負載。
 
 ## 測試效能與診斷
 
-Python step 掛載 Drone 的 [tmpfs temporary volume](https://docs.drone.io/pipeline/docker/syntax/volumes/temporary/)
-到 `/tmp/pytest`，並以 `--basetemp=/tmp/pytest/run` 放置測試資料庫。這仍是檔案型 SQLite，
-保留 WAL、foreign keys、獨立連線及並行交易測試，只讓一次性資料離開 NAS 磁碟；沒有調整
-正式資料庫的 durability。tmpfs 使用主機記憶體，請在 NAS 首次執行時同步觀察記憶體與 swap。
+Python step 以 `--basetemp=/tmp/pytest-run` 將測試資料庫放在容器內的一般暫存目錄，
+不宣告或掛載額外 volume，可供 untrusted repository 執行。Drone linter 會拒絕
+untrusted repository 的 `temp.medium: memory`，因此這裡不使用 tmpfs。
+SQLite 仍保留 WAL、foreign keys、獨立連線及並行交易測試，正式資料庫的 durability
+也維持原設定。容器的 `/tmp` 不保證位於記憶體，仍可能使用 NAS 磁碟；此設定本身不能
+保證消除磁碟 I/O 瓶頸，需用下列診斷輸出確認實際耗時來源。
 
 pytest 使用 `-vv`、不緩衝的 Python 輸出與 `--durations=30`。如果單一測試超過 120 秒，
 `faulthandler_timeout` 會輸出執行緒堆疊供判讀卡住位置，不會自動讓測試失敗。

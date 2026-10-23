@@ -53,7 +53,8 @@ Drone 的快速檢查 `fast-quality` 在非 `main` / `deploy` 分支 push 執行
 `frontend-quality → python-quality`，保留全部 Python 測試但不收集 Python coverage。
 完整 `quality` 在 `main` push、目標為 `main` 的 PR，以及 `main` cron / custom 執行
 `frontend-quality → python-quality → browser-e2e`，包含原有 coverage 門檻與單 worker E2E。
-兩者都用 tmpfs 放置暫存 SQLite，輸出逐項名稱、最慢 30 項與超過 120 秒的執行緒堆疊。
+兩者都將暫存 SQLite 放在容器內 `/tmp/pytest-run`，不需掛載 volume 或將 repository
+設為 trusted；輸出逐項名稱、最慢 30 項與超過 120 秒的執行緒堆疊。
 只有 `main` push 通過完整 quality 後才接續 Portainer 部署；cron 需在 Drone 另外建立。
 詳細流程、timeout 與效能診斷見 [CI/CD](cicd.md)。
 
