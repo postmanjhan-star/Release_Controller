@@ -7,12 +7,66 @@
 
 | 觸發 | Pipeline | 執行內容 |
 | --- | --- | --- |
-| push / pull request（排除 `deploy` 分支） | `quality` | 前端品質檢查 → Python 品質檢查 → Playwright E2E |
+| 非 `main` / `deploy` 分支 push | `fast-quality` | 前端品質檢查 → Ruff 與全部 Python 測試（不收集 Python coverage） |
+| `main` push / 目標為 `main` 的 pull request | `quality` | 前端品質檢查 → 全部 Python 測試與 coverage → Playwright E2E |
+| `main` 的 cron / custom | `quality` | 同上，完整檢查；不部署 |
 | `main` push 且 quality 成功 | `deploy` | 版本檢查 → 更新 `deploy` 分支 → Portainer redeploy → 健康檢查 → 建立 tag |
 | `v*` tag | `release` | 使用 `plugins/gitea-release` 建立 Gitea Release |
 
-三個 pipeline 都使用 Docker runner。前端先產出 `app/static`，Python 測試才可驗證首頁資源。
+四個 pipeline 都使用 Docker runner。前端先產出 `app/static`，Python 測試才可驗證首頁資源。
 `deploy` 同時只執行一筆；推送 `deploy` 分支不會再次觸發品質或部署流程。
+PR 以目標分支判定：目標不是 `main` 的 PR event 不執行完整檢查，但來源分支 push
+仍執行 fast-quality。部署只依賴 `quality`，不會用快速檢查取代完整品質閘門。
+
+兩種檢查都執行所有 Python 測試，包含 MCP、權限、部署、恢復與發布；目前這些測試使用
+模擬上游，不能因目錄名稱而當作真實外部整合測試移除。前端 quality 仍保留原有 coverage。
+完整 Python coverage 門檻維持 85%；Playwright 設定 `CI=true` 並只用一個 worker，降低
+NAS 上的同時負載。
+
+## 測試效能與診斷
+
+Python step 掛載 Drone 的 [tmpfs temporary volume](https://docs.drone.io/pipeline/docker/syntax/volumes/temporary/)
+到 `/tmp/pytest`，並以 `--basetemp=/tmp/pytest/run` 放置測試資料庫。這仍是檔案型 SQLite，
+保留 WAL、foreign keys、獨立連線及並行交易測試，只讓一次性資料離開 NAS 磁碟；沒有調整
+正式資料庫的 durability。tmpfs 使用主機記憶體，請在 NAS 首次執行時同步觀察記憶體與 swap。
+
+pytest 使用 `-vv`、不緩衝的 Python 輸出與 `--durations=30`。如果單一測試超過 120 秒，
+`faulthandler_timeout` 會輸出執行緒堆疊供判讀卡住位置，不會自動讓測試失敗。
+慢測試排行與 `test-results/pytest.xml` 要等 pytest 正常結束才完整；被 Drone 強制終止時，
+應先看 log 最後一個測試名稱與已輸出的堆疊。完整檢查另產生 `coverage.xml`。
+這些檔案目前留在 pipeline workspace，尚未設定外部 artifact 上傳。
+
+在 NAS SSH 另開終端，於測試執行期間觀察：
+
+```sh
+docker stats
+```
+
+容器尚存在時可查 Docker 的 OOM 狀態，並比對 Drone server / runner log 的取消原因：
+
+```sh
+docker inspect --format '{{.State.OOMKilled}} {{.State.ExitCode}} {{.State.Error}}' <test-container>
+```
+
+剛好執行 60 分鐘後出現 `Step is killed (canceled)` 很符合 repository timeout，
+但截圖本身不能證明原因，也不能排除人工取消、自動取消或 OOM。
+Drone 官方記載 [repository 預設 timeout 為 60 分鐘](https://docs.drone.io/server/user/admin/)，
+需由管理員調整；這不是 `.drone.yml` 的 step 設定。
+首次診斷可在 repository Settings 將 Timeout 暫調為 180 分鐘，或使用
+[官方 CLI](https://docs.drone.io/cli/repo/drone-repo-update/)：
+
+```sh
+drone repo update <owner>/Release_Controller --timeout=180m
+```
+
+完成 NAS 量測後再依實測時間設定合理上限。修改本檔不會自動變更 Drone server 的 timeout。
+
+## 手動與每晚完整檢查
+
+在 Drone 對 `main` 建立 custom build，可手動執行完整品質檢查。每晚檢查需要另外在
+repository Settings → Cron Jobs 建立排程，選 `main`；排程與時區以 Drone server 設定為準。
+`.drone.yml` 接受 cron event，不會自行建立排程。cron / custom 都只跑 `quality`，
+不會更新 `deploy` 分支、呼叫 Portainer 或建立 release tag。
 
 ## 初次設定
 

@@ -33,7 +33,7 @@ def test_drone_pipeline_gates_main_deployment_on_quality() -> None:
     assert "concurrency:\n  limit: 1" in deploy
     assert "trigger:\n  branch:\n    - main\n  event:\n    - push" in deploy
     # Promoting deploy must not recursively trigger another quality/deploy run.
-    assert "branch:\n    exclude:\n      - deploy" in quality
+    assert "trigger:\n  branch:\n    - main\n" in quality
     assert "- push\n    - pull_request" in quality
     assert "npm run quality" in _step(quality, "frontend-quality")
     python = _step(quality, "python-quality")
@@ -43,6 +43,60 @@ def test_drone_pipeline_gates_main_deployment_on_quality() -> None:
     assert "appleboy/drone-ssh" not in deploy
     assert "bash ./scripts/deploy-release-controller.sh" not in deploy
     assert not (ROOT / ".gitea/workflows/quality.yml").exists()
+
+
+def test_fast_ci_keeps_all_python_tests_but_cannot_deploy() -> None:
+    fast = _pipeline("fast-quality")
+    assert "trigger:\n  branch:\n    exclude:\n      - main\n      - deploy\n" in fast
+    assert fast.split("\ntrigger:\n")[1].strip().endswith("event:\n    - push")
+    assert "npm ci" in _step(fast, "frontend-quality")
+    assert "npm run quality" in _step(fast, "frontend-quality")
+    python = _step(fast, "python-quality")
+    assert "depends_on:\n      - frontend-quality" in python
+    assert "python -m pytest -vv" in python
+    assert "--cov" not in python
+    assert "browser-e2e" not in fast
+    assert "- fast-quality" not in _pipeline("deploy")
+
+
+def test_full_ci_covers_main_prs_and_explicit_runs_before_deployment() -> None:
+    quality = _pipeline("quality")
+    assert "event:\n    - push\n    - pull_request\n    - cron\n    - custom" in quality
+    python = _step(quality, "python-quality")
+    assert "--cov=app --cov-report=term-missing --cov-report=xml" in python
+    browser = _step(quality, "browser-e2e")
+    assert 'CI: "true"' in browser
+    assert "npm run test:e2e -- --workers=1" in browser
+    for step in (python, browser):
+        assert "when:" not in step
+        assert "failure: ignore" not in step
+    # A scheduled or custom quality run must never trigger a deployment.
+    assert _pipeline("deploy").split("\ntrigger:\n")[1].strip() == (
+        "branch:\n    - main\n  event:\n    - push"
+    )
+
+
+@pytest.mark.parametrize("pipeline_name", ["fast-quality", "quality"])
+def test_python_ci_preserves_sqlite_semantics_and_reports_stalls(pipeline_name: str) -> None:
+    pipeline = _pipeline(pipeline_name)
+    python = _step(pipeline, "python-quality")
+    assert "- name: pytest-tmp\n        path: /tmp/pytest" in python
+    assert "volumes:\n  - name: pytest-tmp\n    temp:\n      medium: memory" in pipeline
+    assert 'PYTHONUNBUFFERED: "1"' in python
+    command = next(line for line in python.splitlines() if "python -m pytest " in line).split(
+        "python -m pytest ", 1
+    )[1]
+    for option in (
+        "-vv",
+        "--basetemp=/tmp/pytest/run",
+        "--durations=30",
+        "-o faulthandler_timeout=120",
+        "--junitxml=test-results/pytest.xml",
+    ):
+        assert option in command
+    for exclusion in ("--ignore", "--deselect", " -k ", " -m ", "--cov-fail-under"):
+        assert exclusion not in command
+    assert " tests/" not in command
 
 
 @pytest.mark.parametrize(
