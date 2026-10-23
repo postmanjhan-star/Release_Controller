@@ -32,6 +32,21 @@ SQLite 仍保留 WAL、foreign keys、獨立連線及並行交易測試，正式
 也維持原設定。容器的 `/tmp` 不保證位於記憶體，仍可能使用 NAS 磁碟；此設定本身不能
 保證消除磁碟 I/O 瓶頸，需用下列診斷輸出確認實際耗時來源。
 
+兩套 CI 都加上 pytest 的 `--sqlite-no-sync` 選項：測試 fixture 會在每個新 SQLAlchemy
+SQLite 連線上，檢查主資料庫檔案的實際路徑，僅對當次 pytest `basetemp` 內的檔案設定
+`PRAGMA synchronous=OFF`。這會省下測試交易的同步落盤成本；WAL、foreign keys、rollback
+及多連線鎖定仍保留，migration 測試的獨立 engine 也適用。指向暫存目錄外的 symlink
+不會被套用；應用程式資料庫與非 SQLite 連線也不會被修改。
+
+此選項只適用可丟棄的測試資料，不驗證 OS crash 或斷電後的持久性；SQLite 官方說明了
+[`synchronous=OFF` 的行為與限制](https://www.sqlite.org/pragma.html#pragma_synchronous)。
+`uv run quality` 預設仍使用原有同步設定，可比較兩種模式，測試數量與 coverage 門檻相同：
+
+```sh
+uv run pytest -vv --durations=30
+uv run pytest -vv --durations=30 --sqlite-no-sync
+```
+
 pytest 使用 `-vv`、不緩衝的 Python 輸出與 `--durations=30`。如果單一測試超過 120 秒，
 `faulthandler_timeout` 會輸出執行緒堆疊供判讀卡住位置，不會自動讓測試失敗。
 慢測試排行與 `test-results/pytest.xml` 要等 pytest 正常結束才完整；被 Drone 強制終止時，

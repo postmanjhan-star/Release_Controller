@@ -89,6 +89,7 @@ def test_python_ci_supports_untrusted_repositories_and_reports_stalls(pipeline_n
     )[1]
     for option in (
         "-vv",
+        "--sqlite-no-sync",
         "--basetemp=/tmp/pytest-run",
         "--durations=30",
         "-o faulthandler_timeout=120",

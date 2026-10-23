@@ -1,5 +1,7 @@
 import os
+import sqlite3
 from collections.abc import Generator
+from pathlib import Path
 
 TEST_ENVIRONMENT = {
     "APP_ENV": "test",
@@ -29,7 +31,7 @@ os.environ.update(TEST_ENVIRONMENT)
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import Engine, delete, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -38,6 +40,51 @@ from app.db.base import Base
 from app.db.models.registry import Project, ProjectComponent, UpstreamConnection
 from app.db.session import create_database_engine, get_db
 from app.main import app
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--sqlite-no-sync",
+        action="store_true",
+        help="Disable disk sync only for disposable SQLite files under pytest's basetemp.",
+    )
+
+
+def configure_disposable_sqlite(connection, temp_root: Path) -> None:
+    """Skip durable writes only for files owned by this pytest run.
+
+    These databases are discarded after testing. Transactions, foreign keys,
+    WAL and locking still work, but OS crash / power-loss durability is not
+    exercised in this mode. Never apply it to the app's configured database.
+    """
+    if not isinstance(connection, sqlite3.Connection):
+        return
+    cursor = connection.cursor()
+    try:
+        databases = cursor.execute("PRAGMA database_list").fetchall()
+        filename = next((row[2] for row in databases if row[1] == "main"), "")
+        if filename and Path(filename).resolve().is_relative_to(temp_root.resolve()):
+            cursor.execute("PRAGMA synchronous = OFF")
+    finally:
+        cursor.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def disposable_sqlite_sync(request, tmp_path_factory):
+    if not request.config.getoption("--sqlite-no-sync"):
+        yield
+        return
+    temp_root = tmp_path_factory.getbasetemp()
+
+    def configure(connection, _record):
+        configure_disposable_sqlite(connection, temp_root)
+
+    # Engine-level events also cover migration tests and independent sessions.
+    event.listen(Engine, "connect", configure)
+    try:
+        yield
+    finally:
+        event.remove(Engine, "connect", configure)
 
 
 @pytest.fixture(autouse=True)

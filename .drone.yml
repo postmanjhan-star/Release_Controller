@@ -31,7 +31,7 @@ steps:
       - python -m ruff check app tests alembic devtools
       - python -m ruff format --check app tests alembic devtools
       # Keep every Python test, including MCP, permissions and recovery.
-      - python -m pytest -vv --basetemp=/tmp/pytest-run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
+      - python -m pytest -vv --sqlite-no-sync --basetemp=/tmp/pytest-run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
 
 trigger:
   branch:
@@ -75,7 +75,7 @@ steps:
       - python -m pip install --no-cache-dir -r requirements-dev.txt
       - python -m ruff check app tests alembic devtools
       - python -m ruff format --check app tests alembic devtools
-      - python -m pytest --cov=app --cov-report=term-missing --cov-report=xml -vv --basetemp=/tmp/pytest-run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
+      - python -m pytest --cov=app --cov-report=term-missing --cov-report=xml -vv --sqlite-no-sync --basetemp=/tmp/pytest-run --durations=30 -o faulthandler_timeout=120 --junitxml=test-results/pytest.xml
 
   - name: browser-e2e
     image: mcr.microsoft.com/playwright:v1.62.1-noble

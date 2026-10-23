@@ -19,6 +19,8 @@ uv run quality
 - `uv run lint`：Ruff lint 與格式檢查，涵蓋 `app`、`tests`、`alembic`、`devtools`。
 - `uv run test`：完整 pytest 與 coverage；可接測試路徑，例如 `uv run test tests/test_api.py`。
 - `uv run quality`：上述靜態檢查與完整測試。
+- `uv run pytest --sqlite-no-sync`：CI 使用的測試加速模式，只對 pytest 暫存目錄內的
+  SQLite 關閉同步落盤；保留交易與鎖定，不測試斷電持久性。一般 quality 預設不啟用。
 
 Coverage 啟用 branch coverage，總門檻為 **85%**，設定在 `pyproject.toml`。
 測試使用暫存 SQLite 及模擬 Drone / Gitea，不操作正式資料。
@@ -55,6 +57,7 @@ Drone 的快速檢查 `fast-quality` 在非 `main` / `deploy` 分支 push 執行
 `frontend-quality → python-quality → browser-e2e`，包含原有 coverage 門檻與單 worker E2E。
 兩者都將暫存 SQLite 放在容器內 `/tmp/pytest-run`，不需掛載 volume 或將 repository
 設為 trusted；輸出逐項名稱、最慢 30 項與超過 120 秒的執行緒堆疊。
+CI 的 `--sqlite-no-sync` 僅加速該次執行可丟棄的資料庫，不改正式資料庫設定，也不略過測試。
 只有 `main` push 通過完整 quality 後才接續 Portainer 部署；cron 需在 Drone 另外建立。
 詳細流程、timeout 與效能診斷見 [CI/CD](cicd.md)。
 
