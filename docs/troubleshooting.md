@@ -63,6 +63,17 @@ FastAPI 提供的是 `app/static`，不是 `frontend/src`。前端建置需求�
   可在 Portainer UI 的 Stack 詳細頁核對 Stack ID、Environment ID，或以同一 API key
   查詢 GET `/api/stacks` 與 GET `/api/endpoints`；不要把完整 JSON、token 或 Stack Env 貼到公開 log。
 - **Portainer build 找不到 Dockerfile**：Stack 的 Compose path 應為 `compose.portainer.yml`。
+- **Git redeploy PUT 回傳 502／503／504**：部署結果尚未確認，Portainer 可能仍在 pull、build
+  或替換容器。不要只因非 JSON 回應就判定 URL 錯誤，也不要立即重送 PUT。
+  [504 表示 gateway 等待上游回應逾時](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/504)；
+  helper 的 PUT 等待上限為 1800 秒，無法延長另一層反向代理自己的 timeout。
+  在 NAS 先看 `docker logs --since 15m --tail 200 portainer`、Stack 的部署紀錄及實際容器狀態，
+  核對預期版本是否上線；舊容器仍健康不等於新部署完成。確認本次工作終止或完成後才決定是否重試。
+  若 Drone 使用 Synology HTTPS 反向代理，可將 `portainer_url` 改為 runner 能存取的 Portainer
+  內網直連網址，例如 HTTP 已啟用並發布 9000 時的 `http://<NAS-IP>:9000`；瀏覽器仍可使用
+  原本的 HTTPS 網域。內網直連需要從 Drone 建置容器的網路驗證，主機能連通不保證容器也能連。
+  若必須保留反向代理，依實際建置時間調整代理的 upstream read timeout，並查代理與 Portainer log。
+  helper 不會自動重送或把 504 當成功，CI 保持失敗，因此不會接續健康檢查與建立 release tag。
 - **Portainer 無法 pull／build**：檢查 Stack 的 Git 憑證、`deploy` 分支、DNS、CA、npm / PyPI 存取。
 - **找不到 `stack.env`**：檢查 Portainer Stack 的應用程式環境設定與檔案是否可供 Compose 載入。
 - **服務已啟動但 CI health 失敗**：確認 `.drone.yml` 的檢查 URL 與主機埠相符，且 runner 可達。

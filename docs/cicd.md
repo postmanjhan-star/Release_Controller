@@ -114,6 +114,9 @@ Environment 對應、Git 設定及 `refs/heads/deploy` 分支，再 PUT
 Git 認證，避免舊版 Portainer 因欄位省略而清空設定；不輸出成功回應中的環境變數或憑證。
 HTTP 失敗會記錄方法、資源路徑、狀態碼與 API 的頂層 message，不印完整 response 或 details。
 遇到 redirect 或非 JSON 回應會停止；連線失敗也不會自動重送部署請求。
+PUT 的 502／503／504、連線中斷或非 JSON 成功回應會標示為 `outcome unknown`：
+Portainer 可能已開始執行，需先查實際部署狀態。CI 仍回傳失敗並阻止後續健康檢查與 tag，
+不會因為結果不明就自動重送；反向代理 timeout 與 helper 的 1800 秒等待上限分開設定。
 
 ## 版本管理
 

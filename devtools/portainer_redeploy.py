@@ -14,6 +14,10 @@ class DeploymentError(RuntimeError):
     pass
 
 
+class DeploymentOutcomeUnknown(DeploymentError):
+    """The redeploy request may still be running after its response was lost."""
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -51,16 +55,28 @@ class Portainer:
             with self.opener.open(request, timeout=1800 if method == "PUT" else 30) as response:
                 body = response.read()
         except HTTPError as exc:
+            uncertain = method == "PUT" and exc.code in (502, 503, 504)
             # Stack responses contain environment secrets. Only print the API's
             # top-level error message, never entire responses or debug details.
             try:
                 message = json.loads(exc.read()).get("message", "")
             except (ValueError, AttributeError):
-                message = "Non-JSON response; check portainer_url and reverse proxy routing."
+                message = (
+                    "Gateway did not return a JSON response."
+                    if uncertain
+                    else "Non-JSON response; check portainer_url and reverse proxy routing."
+                )
             message = str(message).replace(self.token, "[redacted]")[:500]
+            if uncertain:
+                raise DeploymentOutcomeUnknown(
+                    f"{method} {path}: HTTP {exc.code}: {message} "
+                    "Portainer may still be deploying. Check the stack and Portainer logs before "
+                    "retrying; the gateway timeout is independent of the client's 1800s timeout."
+                ) from exc
             raise DeploymentError(f"{method} {path}: HTTP {exc.code}: {message}") from exc
         except (URLError, TimeoutError) as exc:
-            raise DeploymentError(
+            error = DeploymentOutcomeUnknown if method == "PUT" else DeploymentError
+            raise error(
                 f"{method} {path}: connection failed; check Portainer and its logs before retrying."
             ) from exc
         if not body:
@@ -68,6 +84,11 @@ class Portainer:
         try:
             return json.loads(body)
         except ValueError as exc:
+            if method == "PUT":
+                raise DeploymentOutcomeUnknown(
+                    f"{method} {path}: response was not JSON; Portainer may still be deploying. "
+                    "Check the stack and Portainer logs before retrying."
+                ) from exc
             raise DeploymentError(
                 f"{method} {path}: expected JSON; check portainer_url and reverse proxy routing."
             ) from exc
@@ -132,7 +153,8 @@ def main() -> None:
     try:
         redeploy(os.environ, insecure=args.insecure)
     except DeploymentError as exc:
-        print(f"Portainer deployment failed: {exc}", file=sys.stderr)
+        outcome = "outcome unknown" if isinstance(exc, DeploymentOutcomeUnknown) else "failed"
+        print(f"Portainer deployment {outcome}: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
 

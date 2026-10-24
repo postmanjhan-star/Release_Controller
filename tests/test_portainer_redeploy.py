@@ -135,8 +135,45 @@ def test_wrong_git_ref_is_not_redeployed(portainer):
 
 def test_transport_failure_is_not_retried(portainer):
     portainer.replies["/api/stacks/7/git/redeploy?endpointId=3"] = URLError("connection lost")
-    with pytest.raises(deployment.DeploymentError, match="before retrying"):
+    with pytest.raises(deployment.DeploymentOutcomeUnknown, match="before retrying"):
         deployment.redeploy(portainer.environment)
+    assert len(portainer.requests) == 3
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+@pytest.mark.parametrize("body", [b"<html>Gateway timeout</html>", {"message": "Upstream timeout"}])
+def test_gateway_failure_does_not_report_or_retry_the_deployment(portainer, status, body, capsys):
+    portainer.replies["/api/stacks/7/git/redeploy?endpointId=3"] = (status, body)
+    with pytest.raises(deployment.DeploymentOutcomeUnknown) as error:
+        deployment.redeploy(portainer.environment)
+    assert f"HTTP {status}" in str(error.value)
+    assert "may still be deploying" in str(error.value)
+    assert "1800s" in str(error.value)
+    assert "before retrying" in str(error.value)
+    assert "reverse proxy routing" not in str(error.value)
+    assert [req.get_method() for req in portainer.requests] == ["GET", "GET", "PUT"]
+    assert "request completed" not in capsys.readouterr().out
+
+
+def test_non_json_redeploy_success_has_unknown_outcome(portainer, capsys):
+    portainer.replies["/api/stacks/7/git/redeploy?endpointId=3"] = (200, b"<html>proxy page</html>")
+    with pytest.raises(deployment.DeploymentOutcomeUnknown, match="may still be deploying"):
+        deployment.redeploy(portainer.environment)
+    assert len(portainer.requests) == 3
+    assert "request completed" not in capsys.readouterr().out
+
+
+def test_cli_fails_the_pipeline_for_unknown_deployment_outcome(portainer, monkeypatch, capsys):
+    monkeypatch.setattr(deployment.sys, "argv", ["portainer_redeploy"])
+    monkeypatch.setattr(deployment.os, "environ", portainer.environment)
+    portainer.replies["/api/stacks/7/git/redeploy?endpointId=3"] = (504, b"Gateway timeout")
+    with pytest.raises(SystemExit) as error:
+        deployment.main()
+    assert error.value.code == 1
+    output = capsys.readouterr()
+    assert "Portainer deployment outcome unknown" in output.err
+    assert "HTTP 504" in output.err
+    assert "request completed" not in output.out
     assert len(portainer.requests) == 3
 
 
