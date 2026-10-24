@@ -52,6 +52,24 @@ FastAPI 提供的是 `app/static`，不是 `frontend/src`。前端建置需求�
 - **沒有 build**：確認 repository 已在 Drone 啟用、webhook 成功且 branch / event 符合 trigger。
 - **Pipeline pending**：確認 Docker runner 在線、資源與 image registry 可用。
 - **缺少 secret／版本衝突**：依 [CI/CD](cicd.md) 檢查 secrets 與版本來源。
+- **Portainer GET 顯示 connection failed**：尚未取得 HTTP 回應，先看括號內的原因：
+  `connection timed out` 查路由、防火牆與 proxy；`connection refused` 查監聽埠與 Docker port mapping；
+  `DNS lookup failed` 查容器 DNS；TLS 類錯誤則核對 HTTP／HTTPS 與憑證。
+  使用者電腦、NAS 主機、Runner 容器及實際 pipeline step 的網路可能不同，Runner 與 Portainer
+  在同一台 NAS 也不能保證建置容器可以連通。先在 NAS 測一般 Docker bridge（不帶 token、不部署）：
+
+  ```sh
+  docker run --rm --network bridge curlimages/curl:latest --noproxy '*' \
+    --connect-timeout 5 --max-time 10 -sS -o /dev/null -w 'HTTP %{http_code}\n' \
+    http://<NAS-IP>:9000/api/status
+  ```
+
+  HTTP 200 表示該測試容器可達狀態 API；若仍 timeout，先處理 NAS 的容器路由／防火牆。
+  一般 bridge 成功但 CI 失敗時，再檢查實際建置網路與該 step 的 `HTTP_PROXY`、`HTTPS_PROXY`、
+  `NO_PROXY` 設定；Python urllib 會採用 proxy 環境設定，curl 的 `--noproxy '*'` 測試則會繞過它。
+  若採 `http://portainer:9000` 的容器名稱直連，Portainer 與 pipeline step 必須在同一個
+  user-defined network。Runner 可用 [`DRONE_RUNNER_NETWORKS`](https://docs.drone.io/runner/docker/configuration/reference/drone-runner-networks/)
+  將指定網路附加到每個 step；只把 Runner 本身接到該網路並不等於建置容器也已接入。
 - **Portainer API 回傳 404**：目前使用的 `PUT /api/stacks/{id}/git/redeploy` 是
   [官方支援的路徑](https://github.com/portainer/portainer/blob/2.21.5/api/http/handler/stacks/stack_update_git_redeploy.go)。
   找不到 Stack 或其 Environment 都可能回傳 404，不代表必須更換 API。

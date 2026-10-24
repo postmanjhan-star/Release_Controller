@@ -1,8 +1,10 @@
 """Validate the configured Portainer resources before requesting a Git redeploy."""
 
 import argparse
+import errno
 import json
 import os
+import socket
 import ssl
 import sys
 from urllib.error import HTTPError, URLError
@@ -21,6 +23,25 @@ class DeploymentOutcomeUnknown(DeploymentError):
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def connection_failure_reason(exc: Exception) -> str:
+    """Describe network failures without logging URLs or proxy credentials."""
+    reason = exc.reason if isinstance(exc, URLError) else exc
+    if isinstance(reason, socket.gaierror):
+        return "DNS lookup failed"
+    if isinstance(reason, TimeoutError) or getattr(reason, "errno", None) == errno.ETIMEDOUT:
+        return "connection timed out"
+    if isinstance(reason, ssl.SSLError):
+        return "TLS handshake or certificate validation failed"
+    code = getattr(reason, "errno", None)
+    if code == errno.ECONNREFUSED:
+        return "connection refused"
+    if code in (errno.ENETUNREACH, errno.EHOSTUNREACH):
+        return "network or host unreachable"
+    if isinstance(reason, ConnectionResetError):
+        return "connection reset"
+    return "transport error"
 
 
 class Portainer:
@@ -51,8 +72,9 @@ class Portainer:
             headers={"X-API-Key": self.token, "Content-Type": "application/json"},
             method=method,
         )
+        timeout = 1800 if method == "PUT" else 30
         try:
-            with self.opener.open(request, timeout=1800 if method == "PUT" else 30) as response:
+            with self.opener.open(request, timeout=timeout) as response:
                 body = response.read()
         except HTTPError as exc:
             uncertain = method == "PUT" and exc.code in (502, 503, 504)
@@ -74,10 +96,12 @@ class Portainer:
                     "retrying; the gateway timeout is independent of the client's 1800s timeout."
                 ) from exc
             raise DeploymentError(f"{method} {path}: HTTP {exc.code}: {message}") from exc
-        except (URLError, TimeoutError) as exc:
+        except (URLError, OSError) as exc:
             error = DeploymentOutcomeUnknown if method == "PUT" else DeploymentError
             raise error(
-                f"{method} {path}: connection failed; check Portainer and its logs before retrying."
+                f"{method} {path}: connection failed ({connection_failure_reason(exc)}; "
+                f"timeout={timeout}s). Check build-container routing, firewall, proxy settings "
+                "and Portainer logs before retrying."
             ) from exc
         if not body:
             return None

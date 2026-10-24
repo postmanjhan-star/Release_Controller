@@ -1,5 +1,8 @@
+import errno
 import io
 import json
+import socket
+import ssl
 from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 
@@ -138,6 +141,35 @@ def test_transport_failure_is_not_retried(portainer):
     with pytest.raises(deployment.DeploymentOutcomeUnknown, match="before retrying"):
         deployment.redeploy(portainer.environment)
     assert len(portainer.requests) == 3
+
+
+@pytest.mark.parametrize(
+    ("failure", "description"),
+    [
+        (URLError(socket.gaierror(-2, "private DNS details")), "DNS lookup failed"),
+        (URLError(TimeoutError("private timeout details")), "connection timed out"),
+        (TimeoutError("private timeout details"), "connection timed out"),
+        (
+            URLError(ConnectionRefusedError(errno.ECONNREFUSED, "private details")),
+            "connection refused",
+        ),
+        (URLError(OSError(errno.EHOSTUNREACH, "private details")), "network or host unreachable"),
+        (URLError(ssl.SSLError("private TLS details")), "TLS handshake or certificate validation"),
+        (ConnectionResetError(errno.ECONNRESET, "private details"), "connection reset"),
+        (URLError("http://user:password@proxy.test/api-secret"), "transport error"),
+    ],
+)
+def test_get_connection_failures_identify_cause_without_deploying(portainer, failure, description):
+    portainer.replies["/api/endpoints/3"] = failure
+    with pytest.raises(deployment.DeploymentError) as error:
+        deployment.redeploy(portainer.environment)
+    assert type(error.value) is deployment.DeploymentError
+    assert description in str(error.value)
+    assert "timeout=30s" in str(error.value)
+    for sensitive in ("private", "password", "api-secret"):
+        assert sensitive not in str(error.value)
+    assert len(portainer.requests) == 1
+    assert portainer.requests[0].get_method() == "GET"
 
 
 @pytest.mark.parametrize("status", [502, 503, 504])
