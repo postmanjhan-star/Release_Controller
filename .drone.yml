@@ -227,7 +227,7 @@ steps:
   #   podman rm/run
   # ----------------------------------------------------------
   - name: portainer-redeploy
-    image: curlimages/curl:latest
+    image: python:3.10-slim-bookworm
     depends_on:
       - promote-deploy-ref
 
@@ -242,18 +242,7 @@ steps:
         from_secret: portainer_endpoint_id
 
     commands:
-      - |
-        echo "Requesting Portainer redeployment..."
-
-        curl -kfsS \
-          -X PUT \
-          -H "X-API-Key: $PORTAINER_API_TOKEN" \
-          -H "Content-Type: application/json" \
-          "$PORTAINER_URL/api/stacks/$PORTAINER_STACK_ID/git/redeploy?endpointId=$PORTAINER_ENDPOINT_ID" \
-          -d '{"Prune":false}'
-
-        echo
-        echo "Portainer redeploy request completed."
+      - python -m devtools.portainer_redeploy --insecure
 
 
   # ----------------------------------------------------------

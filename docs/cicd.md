@@ -97,15 +97,23 @@ repository Settings → Cron Jobs 建立排程，選 `main`；排程與時區以
 | --- | --- |
 | `gitea_deploy_user` | Git fetch / push 使用者 |
 | `gitea_deploy_token` | 可讀 repository、推送 `deploy` 分支及建立 `v*` tag 的 token |
-| `portainer_url` | Portainer 服務 URL |
+| `portainer_url` | Portainer base URL，可含 proxy prefix；可有或沒有結尾 `/api`，不可填 UI 的 `#!/...` 網址 |
 | `portainer_api_token` | 可重新部署指定 Stack 的 API key |
-| `portainer_stack_id` | 目標 Git Stack ID |
-| `portainer_endpoint_id` | 該 Stack 所屬環境 ID |
+| `portainer_stack_id` | 目標 Git Stack 的正整數 ID，不是名稱 |
+| `portainer_endpoint_id` | 該 Stack 所屬 Environment 的正整數 ID，與 Stack ID 分開確認 |
 | `gitea_server` | 發布 Release 使用的 Gitea URL |
 | `gitea_release_token` | 可在此 repository 建立 Release 的 token |
 
 Runtime 的 OAuth、SMTP、`APP_SECRET_KEY` 等保存在 Portainer 的 Stack 設定中。
 Drone 不會讀取開發者的 `.env`。Gitea 的 branch / tag protection 需允許部署帳號執行上述寫入。
+
+Portainer step 使用 Python 標準函式庫執行 [`devtools/portainer_redeploy.py`](../devtools/portainer_redeploy.py)，
+不需安裝額外套件。它先 GET `/api/endpoints/{id}` 與 `/api/stacks/{id}`，確認資源存在、
+Environment 對應、Git 設定及 `refs/heads/deploy` 分支，再 PUT
+`/api/stacks/{id}/git/redeploy?endpointId={id}`。送出時保留目前的 Env、Git ref 與已存的
+Git 認證，避免舊版 Portainer 因欄位省略而清空設定；不輸出成功回應中的環境變數或憑證。
+HTTP 失敗會記錄方法、資源路徑、狀態碼與 API 的頂層 message，不印完整 response 或 details。
+遇到 redirect 或非 JSON 回應會停止；連線失敗也不會自動重送部署請求。
 
 ## 版本管理
 
@@ -129,9 +137,10 @@ git diff -- pyproject.toml uv.lock
 - **quality 失敗**：先修復失敗的檢查，部署不會執行。
 - **版本衝突**：遞增版本並提交，不覆寫已發布 tag。
 - **推送分支失敗**：檢查 Git 憑證與保護規則；既有 `deploy` 分支需可 fast-forward。
-- **Portainer redeploy 失敗**：檢查 Stack / environment ID、API key、Git 存取與建置 log。
+- **Portainer redeploy 失敗**：依 log 中失敗的 GET / PUT 路徑核對 URL、Stack / Environment ID，
+  詳細判讀見[疑難排解](troubleshooting.md#drone--portainer)。之後再查 API key、Git 存取與建置 log。
 - **健康檢查失敗**：檢查容器 log、綁定位址與 migration。流程最多嘗試 45 次，每次 timeout 5 秒，失敗間隔 2 秒。
 - **Release 未建立**：檢查 tag pipeline 的 token、服務 URL 與執行結果。
 
-目前 Portainer 呼叫使用 `curl -k`，會略過該請求的 TLS 憑證驗證；這是現有設定，非已完成
+目前 Portainer 呼叫使用 `--insecure`，會略過該請求的 TLS 憑證驗證；這是現有設定，非已完成
 憑證驗證。部署失敗也不會自動還原分支、容器或資料庫；處理方式見[更新與維運](operations.md)。

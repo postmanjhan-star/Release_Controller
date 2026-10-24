@@ -35,7 +35,7 @@ Gitea 管理員身分保存於登入 session，權限調整後應重新登入。
 ## 部署與資料
 
 Compose 的綁定位址預設為 loopback，依實際 proxy / runner 網路配置調整。
-目前 `.drone.yml` 對 Portainer 的請求使用 `curl -k`，會略過 TLS 憑證驗證；
+目前 `.drone.yml` 對 Portainer 的請求使用 `--insecure`，會略過 TLS 憑證驗證；
 應在配置受信任 CA 後移除此選項。這不影響應用程式自身的 SMTP TLS 設定。
 
 `/data` 與備份含部署歷程、登入資料及附件，應限制存取並採取適當的備份保護。

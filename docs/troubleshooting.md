@@ -52,6 +52,16 @@ FastAPI 提供的是 `app/static`，不是 `frontend/src`。前端建置需求�
 - **沒有 build**：確認 repository 已在 Drone 啟用、webhook 成功且 branch / event 符合 trigger。
 - **Pipeline pending**：確認 Docker runner 在線、資源與 image registry 可用。
 - **缺少 secret／版本衝突**：依 [CI/CD](cicd.md) 檢查 secrets 與版本來源。
+- **Portainer API 回傳 404**：目前使用的 `PUT /api/stacks/{id}/git/redeploy` 是
+  [官方支援的路徑](https://github.com/portainer/portainer/blob/2.21.5/api/http/handler/stacks/stack_update_git_redeploy.go)。
+  找不到 Stack 或其 Environment 都可能回傳 404，不代表必須更換 API。
+  新的部署 log 會先標示 GET Environment、GET Stack，再標示 PUT redeploy：
+  GET Environment 失敗先核對 `portainer_endpoint_id`；GET Stack 失敗核對 `portainer_stack_id`；
+  兩個 GET 成功後 PUT 才失敗，則依回傳 message 與該版 Portainer API 文件查詢。
+  若回應不是 JSON 或出現 redirect，核對 `portainer_url`、reverse proxy 的 path prefix 與 method routing。
+  URL 不可包含 UI 的 `#!/...` 路徑；helper 會自動處理結尾 `/api` 與 `/`。
+  可在 Portainer UI 的 Stack 詳細頁核對 Stack ID、Environment ID，或以同一 API key
+  查詢 GET `/api/stacks` 與 GET `/api/endpoints`；不要把完整 JSON、token 或 Stack Env 貼到公開 log。
 - **Portainer build 找不到 Dockerfile**：Stack 的 Compose path 應為 `compose.portainer.yml`。
 - **Portainer 無法 pull／build**：檢查 Stack 的 Git 憑證、`deploy` 分支、DNS、CA、npm / PyPI 存取。
 - **找不到 `stack.env`**：檢查 Portainer Stack 的應用程式環境設定與檔案是否可供 Compose 載入。

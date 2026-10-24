@@ -151,13 +151,8 @@ def test_deploy_promotes_tested_commit_and_uses_portainer_secrets() -> None:
         "portainer_endpoint_id",
     ):
         assert f"from_secret: {secret}" in redeploy
-    assert "curl -kfsS" in redeploy
-    assert "-X PUT" in redeploy
-    assert '-H "X-API-Key: $PORTAINER_API_TOKEN"' in redeploy
-    assert (
-        "$PORTAINER_URL/api/stacks/$PORTAINER_STACK_ID/git/redeploy"
-        "?endpointId=$PORTAINER_ENDPOINT_ID"
-    ) in redeploy
+    assert "image: python:3.10-slim-bookworm" in redeploy
+    assert "python -m devtools.portainer_redeploy --insecure" in redeploy
 
 
 def test_health_check_must_succeed_before_release_tagging() -> None:
