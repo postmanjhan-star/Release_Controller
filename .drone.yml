@@ -253,15 +253,24 @@ steps:
     depends_on:
       - portainer-redeploy
 
+    environment:
+      DEPLOYMENT_HEALTH_URL:
+        from_secret: deployment_health_url
+
     commands:
       - |
+        if [ -z "$${DEPLOYMENT_HEALTH_URL:-}" ]; then
+          echo "Set Drone secret deployment_health_url to the application's reachable /health URL." >&2
+          exit 1
+        fi
+
         echo "Waiting for Release Controller health check..."
 
         for i in $(seq 1 45); do
 
           if curl -fsS \
             --max-time 5 \
-            http://192.168.16.17:3100/health; then
+            "$DEPLOYMENT_HEALTH_URL"; then
 
             echo
             echo "Deployment healthy."

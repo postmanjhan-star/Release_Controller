@@ -90,7 +90,7 @@ repository Settings → Cron Jobs 建立排程，選 `main`；排程與時區以
 1. 在 Drone 同步並啟用 repository，確認 Gitea webhook 與 Docker runner 正常。
 2. 依[部署設定](deployment.md)建立 Portainer Git Stack，追蹤 `deploy` 分支。
 3. 在 Drone repository 設定下列 secrets。
-4. 確認 `.drone.yml` 的 `verify-deployment` URL 能從 runner 連到實際服務。
+4. 確認 `deployment_health_url` 能從 Drone 建置容器連到實際服務的 `/health`。
 5. 以 feature branch / pull request 驗證 quality；合併 `main` 後觀察部署及 tag pipeline。
 
 | Drone secret | 用途 |
@@ -101,6 +101,7 @@ repository Settings → Cron Jobs 建立排程，選 `main`；排程與時區以
 | `portainer_api_token` | 可重新部署指定 Stack 的 API key |
 | `portainer_stack_id` | 目標 Git Stack 的正整數 ID，不是名稱 |
 | `portainer_endpoint_id` | 該 Stack 所屬 Environment 的正整數 ID，與 Stack ID 分開確認 |
+| `deployment_health_url` | Release Controller 的完整健康檢查 URL（含 `/health`），必填；必須從 Drone 建置容器可達 |
 | `gitea_server` | 發布 Release 使用的 Gitea URL |
 | `gitea_release_token` | 可在此 repository 建立 Release 的 token |
 
@@ -142,7 +143,8 @@ git diff -- pyproject.toml uv.lock
 - **推送分支失敗**：檢查 Git 憑證與保護規則；既有 `deploy` 分支需可 fast-forward。
 - **Portainer redeploy 失敗**：依 log 中失敗的 GET / PUT 路徑核對 URL、Stack / Environment ID，
   詳細判讀見[疑難排解](troubleshooting.md#drone--portainer)。之後再查 API key、Git 存取與建置 log。
-- **健康檢查失敗**：檢查容器 log、綁定位址與 migration。流程最多嘗試 45 次，每次 timeout 5 秒，失敗間隔 2 秒。
+- **健康檢查失敗**：先確認 `deployment_health_url` 已設定且從建置容器可達，再查容器 log、綁定位址與 migration。
+  URL 未設定時直接失敗；連線檢查最多嘗試 45 次，每次 timeout 5 秒，失敗間隔 2 秒。失敗不建立 tag。
 - **Release 未建立**：檢查 tag pipeline 的 token、服務 URL 與執行結果。
 
 目前 Portainer 呼叫使用 `--insecure`，會略過該請求的 TLS 憑證驗證；這是現有設定，非已完成

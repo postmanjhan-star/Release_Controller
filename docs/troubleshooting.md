@@ -94,7 +94,10 @@ FastAPI 提供的是 `app/static`，不是 `frontend/src`。前端建置需求�
   helper 不會自動重送或把 504 當成功，CI 保持失敗，因此不會接續健康檢查與建立 release tag。
 - **Portainer 無法 pull／build**：檢查 Stack 的 Git 憑證、`deploy` 分支、DNS、CA、npm / PyPI 存取。
 - **找不到 `stack.env`**：檢查 Portainer Stack 的應用程式環境設定與檔案是否可供 Compose 載入。
-- **服務已啟動但 CI health 失敗**：確認 `.drone.yml` 的檢查 URL 與主機埠相符，且 runner 可達。
+- **服務已啟動但 CI health 失敗**：核對 Drone secret `deployment_health_url`，需為 Release Controller
+  的完整 `/health` URL，並從建置容器測試。若容器無法連到 NAS 發布埠，可使用
+  [共同 Docker 網路](deployment.md#容器契約與驗證)；應用程式與建置容器都需加入，
+  再以 `http://release-controller:8000/health` 檢查。不要填 Portainer 的管理網址。
 
 目前不會自動回滾；Portainer 回應成功也不等於應用程式已健康。
 

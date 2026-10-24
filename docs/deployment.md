@@ -60,6 +60,42 @@ curl -fsS http://127.0.0.1:3100/health
 也可從 Portainer 查看容器狀態及 log。健康檢查只確認應用程式與資料庫可用；登入後另測試
 Connections 與專案驗證，確認 Drone / Gitea 的權限及 repository mapping。
 
-Drone 的 `verify-deployment` 目前檢查 `http://192.168.16.17:3100/health`，不會自動讀取
-`HOST_IP` / `HOST_PORT`。更換主機或埠時，需同步調整 `.drone.yml` 並確認 runner 可達。
+Drone 的 `verify-deployment` 使用 repository secret `deployment_health_url`，必須填完整的
+Release Controller `/health` URL；沒有預設主機，也不會自動讀取 `HOST_IP` / `HOST_PORT`。
+更換主機或埠時更新此 secret，無需修改 `.drone.yml`。例如家用 NAS 為 `10.0.4.123`，
+且服務發布在該位址的 `3100` 埠時，可填 `http://10.0.4.123:3100/health`，但必須先從
+Drone 建置容器測試連通；NAS 主機或瀏覽器能連通，不能代表建置容器也可連通。
+`HOST_IP` 預設只綁 `127.0.0.1`，此時 NAS 區網 IP 的入口不會開放。
+
+如果建置容器無法連到 NAS 發布埠，可讓它與應用程式加入同一個 Docker 自訂 bridge network，
+使用 `http://release-controller:8000/health`。只讓 Portainer 加入共同網路還不夠，
+`release-controller` 也必須加入。以下以已建立的 `ci-portainer` 為例，將設定合併到 Stack
+實際使用的 Compose，並在 Git 中保留，讓重新部署後仍有效：
+
+```yaml
+services:
+  release-controller:
+    # 保留原有 build、ports、volumes、environment 等設定
+    networks:
+      - default
+      - ci-portainer
+
+networks:
+  default: {}
+  ci-portainer:
+    external: true
+    name: ci-portainer
+```
+
+Docker runner 的 `DRONE_RUNNER_NETWORKS` 也需包含 `ci-portainer`，讓每個建置容器加入網路。
+可在 NAS 先驗證：
+
+```sh
+docker run --rm --network ci-portainer curlimages/curl:latest \
+  --noproxy '*' --connect-timeout 5 --max-time 10 \
+  -fsS http://release-controller:8000/health
+```
+
+這個 URL 指向應用程式的容器埠 `8000`；Portainer 的 `9000` 是管理 API 入口。
+Compose 內部的 `127.0.0.1:8000/health` 則由應用程式容器自己執行，維持原設定。
 部署流程沒有自動回滾，更新前請依[維運文件](operations.md)備份。
