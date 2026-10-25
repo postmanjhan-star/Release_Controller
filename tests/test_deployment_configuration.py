@@ -261,6 +261,20 @@ def test_portainer_compose_preserves_runtime_configuration() -> None:
     assert "http://127.0.0.1:8000/health" in compose
 
 
+def test_portainer_compose_keeps_application_on_shared_ci_network_after_recreation() -> None:
+    compose = (ROOT / "compose.portainer.yml").read_text(encoding="utf-8")
+    services = compose.split("\nnetworks:\n", 1)[0]
+    application, mcp = services.split("\n  release-controller-mcp:", 1)
+    # Keep the private Stack network while allowing CI to resolve the API by name.
+    assert "    networks:\n      - default\n      - ci-portainer\n" in application
+    assert (
+        "\nnetworks:\n  default: {}\n  ci-portainer:\n    external: true\n    name: ci-portainer"
+        in compose
+    )
+    # The optional MCP service must not join the shared CI network.
+    assert "ci-portainer" not in mcp
+
+
 def test_tag_pipeline_publishes_release_controller_with_official_plugin() -> None:
     release = _pipeline("release")
     assert "image: plugins/gitea-release:1" in release

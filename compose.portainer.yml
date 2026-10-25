@@ -11,6 +11,10 @@ services:
     ports:
       - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-3100}:8000"
 
+    networks:
+      - default
+      - ci-portainer
+
     volumes:
       - "${DATA_DIR:-./data}:/data"
 
@@ -60,3 +64,9 @@ services:
       MCP_MODE: ${MCP_MODE:-readonly}
       MCP_AUDIT_ENABLED: "true"
       BACKGROUND_WORKER_ENABLED: "false"
+
+networks:
+  default: {}
+  ci-portainer:
+    external: true
+    name: ci-portainer

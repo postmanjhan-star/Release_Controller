@@ -12,6 +12,15 @@
 4. 設定下表的 Compose 變數與應用程式環境，確認 `stack.env` 可由 Stack 載入。
 5. 部署後確認容器 log、`/health` 與登入畫面，再接上 Drone 自動部署。
 
+這份 Compose 使用預先建立的外部 Docker 網路 `ci-portainer`。在部署主機先確認：
+
+```sh
+docker network inspect ci-portainer --format '{{.Name}}'
+```
+
+若網路不存在，再執行 `docker network create ci-portainer`。Compose 不會自動建立此
+external network；部署到其他主機（包含公司環境）時也需先建立。
+
 請明確選擇 [`compose.portainer.yml`](../compose.portainer.yml)，不要使用根目錄舊的
 `docker-compose.yml`；後者仍引用不存在的 `Dockerfile` 與特定主機路徑。
 
@@ -62,33 +71,19 @@ Connections 與專案驗證，確認 Drone / Gitea 的權限及 repository mappi
 
 Drone 的 `verify-deployment` 使用 repository secret `deployment_health_url`，必須填完整的
 Release Controller `/health` URL；沒有預設主機，也不會自動讀取 `HOST_IP` / `HOST_PORT`。
-更換主機或埠時更新此 secret，無需修改 `.drone.yml`。例如家用 NAS 為 `10.0.4.123`，
-且服務發布在該位址的 `3100` 埠時，可填 `http://10.0.4.123:3100/health`，但必須先從
+更換主機或埠時更新此 secret，無需修改 `.drone.yml`。例如家用 NAS 為 `<NAS-IP>`，
+且服務發布在該位址的 `3100` 埠時，可填 `http://<NAS-IP>:3100/health`，但必須先從
 Drone 建置容器測試連通；NAS 主機或瀏覽器能連通，不能代表建置容器也可連通。
 `HOST_IP` 預設只綁 `127.0.0.1`，此時 NAS 區網 IP 的入口不會開放。
 
-如果建置容器無法連到 NAS 發布埠，可讓它與應用程式加入同一個 Docker 自訂 bridge network，
-使用 `http://release-controller:8000/health`。只讓 Portainer 加入共同網路還不夠，
-`release-controller` 也必須加入。以下以已建立的 `ci-portainer` 為例，將設定合併到 Stack
-實際使用的 Compose，並在 Git 中保留，讓重新部署後仍有效：
+[`compose.portainer.yml`](../compose.portainer.yml) 已將 `release-controller` 加入 Stack
+自己的 `default` 網路與外部 `ci-portainer` 網路；Portainer 重建容器時也會依此自動加入，
+不需每次執行 `docker network connect`。選用的 MCP 容器仍只使用 Stack 自己的網路。
 
-```yaml
-services:
-  release-controller:
-    # 保留原有 build、ports、volumes、environment 等設定
-    networks:
-      - default
-      - ci-portainer
-
-networks:
-  default: {}
-  ci-portainer:
-    external: true
-    name: ci-portainer
-```
-
-Docker runner 的 `DRONE_RUNNER_NETWORKS` 也需包含 `ci-portainer`，讓每個建置容器加入網路。
-可在 NAS 先驗證：
+Docker runner 的 `DRONE_RUNNER_NETWORKS` 也需包含 `ci-portainer`，讓每個建置容器加入網路，
+並將 Drone secret `deployment_health_url` 設為 `http://release-controller:8000/health`。
+這個容器名稱直連方式要求 runner 的建置容器與應用程式位於同一台 Docker 主機，
+單純在不同主機建立相同名稱的 bridge network 並不會互通。可在部署主機先驗證：
 
 ```sh
 docker run --rm --network ci-portainer curlimages/curl:latest \
