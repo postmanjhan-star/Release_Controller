@@ -15,6 +15,8 @@ import type {
   ProjectValidation,
   ReleaseBundle,
   RepositorySummary,
+  RepositorySearchItem,
+  RepositorySearchResponse,
   UpstreamConnection,
   WorkflowEvent,
 } from './domain';
@@ -1799,9 +1801,96 @@ function fillConnectionOptions(selector: string, kind: string, chosen: string | 
   field.value = chosen || '';
 }
 
+let repositorySearchVersion = 0;
+let repositorySearchPage = 0;
+let repositoryMatches: RepositorySearchItem[] = [];
+let repositoryConnectionId = '';
+
+function resetRepositorySearch() {
+  repositorySearchVersion += 1;
+  repositorySearchPage = 0;
+  repositoryMatches = [];
+  repositoryConnectionId = '';
+  const results = document.querySelector('#project-repository-results');
+  results.replaceChildren(new Option('Search to choose a repository', ''));
+  results.disabled = true;
+  document.querySelector('#project-repository-more').hidden = true;
+  document.querySelector('#project-repository-more').disabled = false;
+  document.querySelector('#project-repository-search').disabled = false;
+  document.querySelector('#project-repository-status').textContent = 'Uses the selected connection below. Choose a result to fill Key, Name and Description.';
+}
+
+async function searchProjectRepositories(more = false) {
+  const version = ++repositorySearchVersion;
+  const run = generation;
+  const kind = document.querySelector('#project-repository-source').value;
+  const connectionId = more ? repositoryConnectionId : document.querySelector(`#project-${kind}-connection`).value;
+  const query = document.querySelector('#project-repository-query').value.trim();
+  const page = more ? repositorySearchPage + 1 : 1;
+  const params = new URLSearchParams({ kind, q: query, page: String(page) });
+  if (connectionId) params.set('connection_id', connectionId);
+  const button = document.querySelector('#project-repository-search');
+  const moreButton = document.querySelector('#project-repository-more');
+  const results = document.querySelector('#project-repository-results');
+  const status = document.querySelector('#project-repository-status');
+  button.disabled = true;
+  moreButton.disabled = true;
+  results.disabled = true;
+  status.textContent = 'Searching repositories…';
+  try {
+    const response = await typedApi<RepositorySearchResponse>(`${API}/connections/repositories?${params}`);
+    if (version !== repositorySearchVersion || run !== generation || !elements.projectDialog.open) return;
+    repositorySearchPage = page;
+    repositoryConnectionId = response.connection_id;
+    repositoryMatches = more ? [...repositoryMatches, ...response.items] : response.items;
+    results.replaceChildren(
+      new Option(repositoryMatches.length ? 'Choose a repository' : 'No repositories found', ''),
+      ...repositoryMatches.map((item, index) => new Option(item.full_name, String(index))),
+    );
+    results.disabled = repositoryMatches.length === 0;
+    moreButton.hidden = !response.has_more;
+    status.textContent = repositoryMatches.length
+      ? `${repositoryMatches.length} repositories found. Choose one to fill the project details.`
+      : 'No repositories found. Try another keyword or connection.';
+  } catch (error) {
+    if (version !== repositorySearchVersion || run !== generation || !elements.projectDialog.open) return;
+    if (!more) {
+      repositoryMatches = [];
+      results.replaceChildren(new Option('Search unavailable', ''));
+      moreButton.hidden = true;
+    }
+    results.disabled = repositoryMatches.length === 0;
+    status.textContent = error.message;
+  } finally {
+    if (version === repositorySearchVersion && run === generation) {
+      button.disabled = false;
+      moreButton.disabled = false;
+    }
+  }
+}
+
+function fillProjectFromRepository() {
+  const value = document.querySelector('#project-repository-results').value;
+  const repository = value === '' ? null : repositoryMatches[Number(value)];
+  if (!repository) return;
+  const form = document.querySelector('#project-form') as HTMLFormElement;
+  // Keep the suggested key within the registry's permanent slug constraints.
+  const key = repository.name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 50);
+  (form.elements.namedItem('key') as HTMLInputElement).value = key;
+  (form.elements.namedItem('name') as HTMLInputElement).value = repository.name.slice(0, 200);
+  (form.elements.namedItem('description') as HTMLTextAreaElement).value = repository.description.slice(0, 2000);
+  const kind = document.querySelector('#project-repository-source').value;
+  document.querySelector(`#project-${kind}-connection`).value = repositoryConnectionId;
+  document.querySelector('#project-repository-status').textContent = key
+    ? `Filled from ${repository.full_name}. Review the details before creating; add deployment components after creation.`
+    : `Filled from ${repository.full_name}. Enter a Key using lowercase letters or digits.`;
+}
+
 function openProjectDialog(project: Project | null) {
   const form = document.querySelector('#project-form') as HTMLFormElement;
   form.reset();
+  resetRepositorySearch();
+  document.querySelector('#project-repository-picker').hidden = Boolean(project);
   elements.projectDialog.dataset.projectKey = project?.key || '';
   document.querySelector('#project-dialog-title').textContent = project ? 'Edit project' : 'New project';
   document.querySelector('#project-submit').textContent = project ? 'Save project' : 'Create project';
@@ -2355,6 +2444,17 @@ function bindEvents() {
   document.querySelector('#recipient-form').addEventListener('submit', (event: any) => { event.preventDefault(); createRecipient(event.currentTarget); });
   document.querySelector('#new-project').addEventListener('click', () => openProjectDialog(null));
   document.querySelector('#project-form').addEventListener('submit', (event: any) => { event.preventDefault(); void saveProject(event.currentTarget); });
+  document.querySelector('#project-repository-search').addEventListener('click', () => void searchProjectRepositories());
+  document.querySelector('#project-repository-more').addEventListener('click', () => void searchProjectRepositories(true));
+  document.querySelector('#project-repository-results').addEventListener('change', fillProjectFromRepository);
+  document.querySelector('#project-repository-query').addEventListener('input', resetRepositorySearch);
+  document.querySelector('#project-repository-query').addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key === 'Enter') { event.preventDefault(); void searchProjectRepositories(); }
+  });
+  ['#project-repository-source', '#project-drone-connection', '#project-gitea-connection'].forEach((selector) => {
+    document.querySelector(selector).addEventListener('change', resetRepositorySearch);
+  });
+  elements.projectDialog.addEventListener('close', resetRepositorySearch);
   document.querySelector('#component-form').addEventListener('submit', (event: any) => { event.preventDefault(); void saveComponent(event.currentTarget); });
   document.querySelector('#new-connection').addEventListener('click', () => openConnectionDialog(null));
   document.querySelector('#connection-form').addEventListener('submit', (event: any) => { event.preventDefault(); void saveConnection(event.currentTarget); });

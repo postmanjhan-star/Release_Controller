@@ -11,6 +11,7 @@ from app.integrations.drone.exceptions import (
     DroneUnexpectedResponseError,
 )
 from app.integrations.drone.schemas import DroneBuild, DroneRepositoryInfo
+from app.integrations.repositories import RepositoryMatch
 from app.integrations.retry import RetryPolicy, retry_read
 
 # Reaching Drone can fail for reasons that say nothing about the repository or the
@@ -46,6 +47,17 @@ class DroneClient:
         )
         self._retry_policy = retry_policy or RetryPolicy()
         self._headers = {"Authorization": f"Bearer {token}"}
+
+    def list_repositories(self) -> list[RepositoryMatch]:
+        payload = self._read("GET", "/api/user/repos", description="list_repositories")
+        if not isinstance(payload, list):
+            raise DroneUnexpectedResponseError("Drone returned an invalid repository list")
+        try:
+            return [RepositoryMatch.from_payload(item) for item in payload]
+        except ValueError as exc:
+            raise DroneUnexpectedResponseError(
+                "Drone returned invalid repository metadata"
+            ) from exc
 
     def list_builds(self, owner: str, repo: str, limit: int = 20) -> list[DroneBuild]:
         payload = self._read(

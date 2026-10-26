@@ -652,6 +652,63 @@ function SettingsDialogs() {
             </button>
           </div>
           <div className="form-grid">
+            <fieldset
+              id="project-repository-picker"
+              className="repository-picker full-width"
+            >
+              <legend>Fill from Drone / Gitea</legend>
+              <div className="repository-search-controls">
+                <label>
+                  Search source
+                  <select id="project-repository-source" defaultValue="drone">
+                    <option value="drone">Drone CI</option>
+                    <option value="gitea">Gitea</option>
+                  </select>
+                </label>
+                <label>
+                  Repository keyword
+                  <input
+                    id="project-repository-query"
+                    maxLength={200}
+                    placeholder="Search repositories…"
+                  />
+                </label>
+                <button
+                  type="button"
+                  id="project-repository-search"
+                  className="button secondary"
+                >
+                  Search
+                </button>
+              </div>
+              <label>
+                Repository
+                <select
+                  id="project-repository-results"
+                  disabled
+                  defaultValue=""
+                >
+                  <option value="">Search to choose a repository</option>
+                </select>
+              </label>
+              <p
+                id="project-repository-status"
+                className="field-help"
+                role="status"
+                aria-live="polite"
+              >
+                Uses the selected connection below. Choose a result to fill Key,
+                Name and Description.
+              </p>
+              <button
+                type="button"
+                id="project-repository-more"
+                className="button secondary"
+                hidden
+              >
+                Load more
+              </button>
+            </fieldset>
             <label id="project-key-field">
               Key
               <input

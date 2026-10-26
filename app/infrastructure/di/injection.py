@@ -41,6 +41,7 @@ from app.infrastructure.sqlite.release.release_repository import SqlAlchemyRelea
 from app.infrastructure.sqlite.unit_of_work import SqlAlchemyUnitOfWork
 from app.infrastructure.upstream.component_checker import UpstreamComponentChecker
 from app.infrastructure.upstream.connection_probe import UpstreamConnectionProbe
+from app.infrastructure.upstream.repository_catalog import RepositoryCatalog
 from app.integrations.drone.client import DroneClient
 from app.integrations.factory import build_drone_client, build_gitea_client
 from app.integrations.gitea.client import GiteaClient
@@ -470,6 +471,13 @@ def get_resolve_connection_usecase(
     connections: ConnectionRepository = Depends(get_connection_repository),
 ) -> ResolveConnectionUseCase:
     return new_resolve_connection_usecase(connections)
+
+
+def get_repository_catalog(
+    resolve_connection: ResolveConnectionUseCase = Depends(get_resolve_connection_usecase),
+    settings: Settings = Depends(get_settings),
+) -> RepositoryCatalog:
+    return RepositoryCatalog(resolve_connection, settings)
 
 
 def get_drone_connection_resolver(

@@ -30,6 +30,19 @@ export interface RepositorySummary {
   default_branch?: string;
 }
 
+export interface RepositorySearchItem {
+  owner: string;
+  name: string;
+  full_name: string;
+  description: string;
+}
+
+export interface RepositorySearchResponse {
+  connection_id: string;
+  items: RepositorySearchItem[];
+  has_more: boolean;
+}
+
 export interface DroneBuildList {
   items: DroneBuild[];
   branches: string[];

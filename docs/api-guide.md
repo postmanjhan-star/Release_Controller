@@ -43,6 +43,7 @@ Base path 為 `/api/v1`。完整欄位與回應以執行中服務的 `/docs`、`
 | `GET /projects/{project_ref}`、`PATCH /projects/{project_ref}` | 查看、修改專案 |
 | `POST /projects/{project_ref}/validate` | 驗證專案的上游設定 |
 | `GET /connections`、`POST /connections` | 列出、建立連線 |
+| `GET /connections/repositories` | 透過指定或預設的 Drone / Gitea 連線搜尋 repository |
 | `POST /connections/{connection_id}/test` | 測試連線 |
 | `GET /projects/{project_ref}/components/{component_ref}/builds` | 查詢元件的 repository、branches 與 builds |
 | `POST /projects/{project_ref}/components/{component_ref}/builds/{build_number}/promote` | 單元件部署 |
@@ -60,6 +61,14 @@ Base path 為 `/api/v1`。完整欄位與回應以執行中服務的 `/docs`、`
 
 `project_ref` 可使用專案 ID 或 key，`component_ref` 可使用元件 ID 或 key。
 各清單的篩選與分頁參數不完全相同，請查 `/docs`，不要假設所有端點接受相同欄位。
+
+Repository 搜尋參數為 `kind=drone|gitea`、選用的 `connection_id`、`q`（最多 200 字）、
+`page`（從 1 開始）及 `limit`（預設 20，最多 50）。回傳實際的 `connection_id`、
+`items`（owner、name、full_name、description）及 `has_more`。Drone 使用
+[使用者 repository 清單](https://docs.drone.io/api/user/user_repos/)依完整名稱篩選與分頁；
+Gitea 使用[repository 搜尋 API](https://docs.gitea.com/api/operations/repo-search/)，包含
+token 可讀取的私人 repository。缺少預設連線或連線種類不符回傳 422，連線不存在回傳
+404，無法解密憑證回傳 503，上游搜尋失敗回傳 502；回應不含 token 或上游原始錯誤內容。
 
 ## 部署
 

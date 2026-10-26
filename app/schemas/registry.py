@@ -92,6 +92,21 @@ class ConnectionTestResponse(BaseModel):
     checked_at: datetime
 
 
+class RepositorySearchItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    owner: str
+    name: str
+    full_name: str
+    description: str
+
+
+class RepositorySearchResponse(BaseModel):
+    connection_id: str
+    items: list[RepositorySearchItem]
+    has_more: bool
+
+
 # --------------------------------------------------------------------------- #
 # Components
 # --------------------------------------------------------------------------- #

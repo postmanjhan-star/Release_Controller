@@ -13,6 +13,7 @@ from app.integrations.gitea.exceptions import (
     GiteaUnexpectedResponseError,
 )
 from app.integrations.gitea.schemas import GiteaRelease, GiteaRepository, GiteaTag
+from app.integrations.repositories import RepositoryMatch
 from app.integrations.retry import RetryPolicy, retry_read
 
 # Only failures that carry no information about the resource are retried.  A 404
@@ -77,6 +78,28 @@ class GiteaClient:
         if not isinstance(payload, dict) or payload.get("status") != "pass":
             raise GiteaUnexpectedResponseError("Gitea health endpoint did not report pass")
         return payload
+
+    def search_repositories(
+        self, query: str, page: int = 1, limit: int = 20
+    ) -> list[RepositoryMatch]:
+        payload = self._read(
+            "GET",
+            "/api/v1/repos/search",
+            description="search_repositories",
+            params={"q": query, "page": page, "limit": limit, "private": True},
+        )
+        if (
+            not isinstance(payload, dict)
+            or payload.get("ok") is False
+            or not isinstance(payload.get("data"), list)
+        ):
+            raise GiteaUnexpectedResponseError("Gitea returned an invalid repository list")
+        try:
+            return [RepositoryMatch.from_payload(item) for item in payload["data"]]
+        except ValueError as exc:
+            raise GiteaUnexpectedResponseError(
+                "Gitea returned invalid repository metadata"
+            ) from exc
 
     def get_repository(self, owner: str, repo: str) -> GiteaRepository:
         payload = self._read(

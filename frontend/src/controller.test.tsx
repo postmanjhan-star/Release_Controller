@@ -1,5 +1,5 @@
 import { configureStore } from "@reduxjs/toolkit";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { Provider } from "react-redux";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthState } from "./authSlice";
@@ -314,6 +314,7 @@ let data: {
   recipients: Array<{ id: string; email: string; created_at: string }>;
   failReleaseList: boolean;
   hangHealth: boolean;
+  failRepositorySearch?: boolean;
 };
 
 const HEALTH_PATHS = new Set([
@@ -360,6 +361,35 @@ function respond(method: string, path: string, body?: unknown): Response {
       return json(created, 201);
     }
     return json({ items: data.connections });
+  }
+
+  if (path.startsWith("/api/v1/connections/repositories?")) {
+    if (data.failRepositorySearch)
+      return json({ detail: "Repository search failed" }, 502);
+    const params = new URL(path, "https://controller.test").searchParams;
+    const secondPage = params.get("page") === "2";
+    return json({
+      connection_id:
+        params.get("connection_id") || `conn-${params.get("kind")}`,
+      items: secondPage
+        ? [
+            {
+              owner: "acme",
+              name: "worker",
+              full_name: "acme/worker",
+              description: "",
+            },
+          ]
+        : [
+            {
+              owner: "acme",
+              name: "SMT.Assistant",
+              full_name: "acme/SMT.Assistant",
+              description: "Assembly console",
+            },
+          ],
+      has_more: !secondPage,
+    });
   }
 
   const connectionTest = path.match(/^\/api\/v1\/connections\/([^/?]+)\/test$/);
@@ -1331,6 +1361,170 @@ describe("專案設定", () => {
     );
   }
 
+  async function searchRepositories() {
+    (
+      document.querySelector("#project-repository-search") as HTMLButtonElement
+    ).click();
+    await waitFor(() =>
+      expect(
+        document.querySelector("#project-repository-results"),
+      ).toBeEnabled(),
+    );
+    return document.querySelector(
+      "#project-repository-results",
+    ) as HTMLSelectElement;
+  }
+
+  it("從 Drone 搜尋選單帶入專案資料，仍可修改後建立", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#new-project") as HTMLButtonElement).click();
+    const results = await searchRepositories();
+    results.value = "0";
+    fireEvent.change(results);
+    const form = document.querySelector("#project-form") as HTMLFormElement;
+    expect(field(form, "key").value).toBe("smt-assistant");
+    expect(field(form, "name").value).toBe("SMT.Assistant");
+    expect(field(form, "description").value).toBe("Assembly console");
+    expect(field(form, "drone_connection_id").value).toBe("conn-drone");
+    field(form, "name").value = "My assembly console";
+    submit("#project-form");
+    await waitFor(() =>
+      expect(called("POST", "/api/v1/projects")).toHaveLength(1),
+    );
+    expect(called("POST", "/api/v1/projects")[0].body).toMatchObject({
+      key: "smt-assistant",
+      name: "My assembly console",
+      description: "Assembly console",
+      default_target: "production",
+      drone_connection_id: "conn-drone",
+      gitea_connection_id: null,
+    });
+  });
+
+  it("以選取的 Gitea 連線搜尋並正確傳送特殊字元關鍵字", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#new-project") as HTMLButtonElement).click();
+    fireEvent.change(document.querySelector("#project-repository-source")!, {
+      target: { value: "gitea" },
+    });
+    fireEvent.change(document.querySelector("#project-gitea-connection")!, {
+      target: { value: "conn-gitea" },
+    });
+    fireEvent.input(document.querySelector("#project-repository-query")!, {
+      target: { value: "engine & api" },
+    });
+    const results = await searchRepositories();
+    const request = calls.find((call) =>
+      call.path.startsWith("/api/v1/connections/repositories?"),
+    )!;
+    const params = new URL(request.path, "https://controller.test")
+      .searchParams;
+    expect(Object.fromEntries(params)).toEqual({
+      kind: "gitea",
+      q: "engine & api",
+      page: "1",
+      connection_id: "conn-gitea",
+    });
+    fireEvent.change(results, { target: { value: "0" } });
+    const form = document.querySelector("#project-form") as HTMLFormElement;
+    expect(field(form, "gitea_connection_id").value).toBe("conn-gitea");
+    expect(field(form, "drone_connection_id").value).toBe("");
+    expect(field(form, "key").value).toBe("smt-assistant");
+  });
+
+  it("載入更多結果，並在切換連線時清除舊選項", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#new-project") as HTMLButtonElement).click();
+    const results = await searchRepositories();
+    (
+      document.querySelector("#project-repository-more") as HTMLButtonElement
+    ).click();
+    await waitFor(() => expect(results.options).toHaveLength(3));
+    expect(
+      document.querySelector("#project-repository-more"),
+    ).not.toBeVisible();
+    fireEvent.change(results, { target: { value: "1" } });
+    const form = document.querySelector("#project-form") as HTMLFormElement;
+    expect(field(form, "name").value).toBe("worker");
+    expect(field(form, "description").value).toBe("");
+    fireEvent.change(document.querySelector("#project-drone-connection")!, {
+      target: { value: "" },
+    });
+    expect(results).toBeDisabled();
+    expect(results.options).toHaveLength(1);
+    expect(field(form, "name").value).toBe("worker");
+  });
+
+  it("搜尋失敗仍保留手動輸入並可重試", async () => {
+    data.failRepositorySearch = true;
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#new-project") as HTMLButtonElement).click();
+    const form = document.querySelector("#project-form") as HTMLFormElement;
+    field(form, "name").value = "Manual project";
+    (
+      document.querySelector("#project-repository-search") as HTMLButtonElement
+    ).click();
+    await waitFor(() =>
+      expect(
+        document.querySelector("#project-repository-status"),
+      ).toHaveTextContent("Repository search failed"),
+    );
+    expect(field(form, "name").value).toBe("Manual project");
+    expect(
+      document.querySelector("#project-repository-results"),
+    ).toBeDisabled();
+    data.failRepositorySearch = false;
+    await searchRepositories();
+    expect(field(form, "name").value).toBe("Manual project");
+  });
+
+  it("來源切換後忽略較晚回傳的搜尋結果", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#new-project") as HTMLButtonElement).click();
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    let resolveSearch!: (response: Response) => void;
+    const delayed = new Promise<Response>((resolve) => {
+      resolveSearch = resolve;
+    });
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).includes("/connections/repositories?")
+        ? delayed
+        : originalFetch(input, init),
+    );
+    (
+      document.querySelector("#project-repository-search") as HTMLButtonElement
+    ).click();
+    fireEvent.change(document.querySelector("#project-repository-source")!, {
+      target: { value: "gitea" },
+    });
+    resolveSearch(
+      json({
+        connection_id: "conn-drone",
+        items: [
+          { owner: "old", name: "old", full_name: "old/old", description: "" },
+        ],
+        has_more: false,
+      }),
+    );
+    await delayed;
+    await waitFor(() =>
+      expect(
+        document.querySelector("#project-repository-search"),
+      ).toBeEnabled(),
+    );
+    expect(
+      document.querySelector("#project-repository-results"),
+    ).toBeDisabled();
+    expect(
+      document.querySelector("#project-repository-results"),
+    ).not.toHaveTextContent("old/old");
+  });
+
   it("列出專案並依部署順序畫出元件", async () => {
     await mountApp();
     await openProjects();
@@ -1421,6 +1615,9 @@ describe("專案設定", () => {
     await openProjects();
 
     (document.querySelector("#edit-project") as HTMLButtonElement).click();
+    expect(
+      document.querySelector("#project-repository-picker"),
+    ).not.toBeVisible();
     expect(document.querySelector("#project-key-field")).toHaveAttribute(
       "hidden",
     );

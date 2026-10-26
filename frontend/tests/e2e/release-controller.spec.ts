@@ -778,6 +778,99 @@ test("redirects the legacy schedules view and selects a pending schedule", async
   expect(documentRequests).toBe(1);
 });
 
+for (const source of ["drone", "gitea"] as const) {
+  test(`creates a project from a ${source} repository search`, async ({
+    page,
+  }) => {
+    let created: (typeof projectResponse.items)[number] | null = null;
+    let submitted: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/projects?*", (route) =>
+      route.fulfill({
+        json: {
+          items: [...projectResponse.items, ...(created ? [created] : [])],
+        },
+      }),
+    );
+    await page.route("**/api/v1/projects", async (route) => {
+      if (route.request().method() === "POST") {
+        submitted = route.request().postDataJSON();
+        created = {
+          ...projectResponse.items[0],
+          ...submitted,
+          id: "project-discovered",
+          key: "smt-assistant",
+          name: "SMT.Assistant",
+          components: [],
+        };
+        await route.fulfill({ status: 201, json: created });
+      } else {
+        await route.fulfill({
+          json: {
+            items: [...projectResponse.items, ...(created ? [created] : [])],
+          },
+        });
+      }
+    });
+    await page.route("**/api/v1/connections/repositories?*", async (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      expect(params.get("kind")).toBe(source);
+      expect(params.get("connection_id")).toBe(`${source}-default`);
+      expect(params.get("q")).toBe("SMT & tools");
+      await route.fulfill({
+        json: {
+          connection_id: `${source}-default`,
+          has_more: false,
+          items: [
+            {
+              owner: "release",
+              name: "SMT.Assistant",
+              full_name: "release/SMT.Assistant",
+              description: "Assembly tools",
+            },
+          ],
+        },
+      });
+    });
+    await page.goto("/?view=projects");
+    await page
+      .getByRole("button", { name: "New project", exact: true })
+      .click();
+    await expect(page.locator("#project-repository-more")).not.toBeVisible();
+    await page.locator("#project-repository-source").selectOption(source);
+    await page
+      .locator(`#project-${source}-connection`)
+      .selectOption(`${source}-default`);
+    await page.locator("#project-repository-query").fill("SMT & tools");
+    await page.locator("#project-repository-query").press("Enter");
+    await expect(page.locator("#project-repository-results")).toBeEnabled();
+    await expect(page.locator("#project-repository-more")).not.toBeVisible();
+    expect(submitted).toBeNull();
+    await page
+      .locator("#project-repository-results")
+      .selectOption({ label: "release/SMT.Assistant" });
+    await expect(page.locator('#project-form [name="key"]')).toHaveValue(
+      "smt-assistant",
+    );
+    await expect(page.locator('#project-form [name="name"]')).toHaveValue(
+      "SMT.Assistant",
+    );
+    await expect(
+      page.locator('#project-form [name="description"]'),
+    ).toHaveValue("Assembly tools");
+    await page
+      .getByRole("button", { name: "Create project", exact: true })
+      .click();
+    await expect(page.locator("#project-dialog")).not.toBeVisible();
+    expect(submitted).toMatchObject({
+      key: "smt-assistant",
+      name: "SMT.Assistant",
+      description: "Assembly tools",
+      default_target: "production",
+      [`${source}_connection_id`]: `${source}-default`,
+    });
+  });
+}
+
 test("edits a project's components and its upstream connections", async ({
   page,
 }) => {

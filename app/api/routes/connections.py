@@ -2,10 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.core.crypto import TokenDecryptionError
 from app.domain.registry.exceptions import (
     ConnectionInUseError,
     ConnectionNameTakenError,
     ConnectionNotFoundError,
+    NoDefaultConnectionError,
 )
 from app.domain.registry.value_objects import ConnectionKind
 from app.infrastructure.di.injection import (
@@ -13,16 +15,21 @@ from app.infrastructure.di.injection import (
     get_delete_connection_usecase,
     get_get_connection_usecase,
     get_list_connections_usecase,
+    get_repository_catalog,
     get_test_connection_usecase,
     get_update_connection_usecase,
     require_admin,
 )
+from app.infrastructure.upstream.repository_catalog import RepositoryCatalog
+from app.integrations.drone.exceptions import DroneError
+from app.integrations.gitea.exceptions import GiteaError
 from app.schemas.registry import (
     ConnectionCreate,
     ConnectionListResponse,
     ConnectionResponse,
     ConnectionTestResponse,
     ConnectionUpdate,
+    RepositorySearchResponse,
 )
 from app.usecase.registry.create_connection_usecase import CreateConnectionUseCase
 from app.usecase.registry.delete_connection_usecase import DeleteConnectionUseCase
@@ -66,6 +73,31 @@ def create_connection(payload: ConnectionCreate, usecase: CreateConnection) -> C
         )
     except ConnectionNameTakenError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get("/repositories", response_model=RepositorySearchResponse)
+def search_repositories(
+    kind: Annotated[ConnectionKind, Query()],
+    catalog: Annotated[RepositoryCatalog, Depends(get_repository_catalog)],
+    connection_id: Annotated[str | None, Query()] = None,
+    q: Annotated[str, Query(max_length=200)] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> RepositorySearchResponse:
+    try:
+        resolved_id, items, has_more = catalog.search(kind, connection_id, q.strip(), page, limit)
+        return RepositorySearchResponse(connection_id=resolved_id, items=items, has_more=has_more)
+    except ConnectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Connection not found") from exc
+    except (NoDefaultConnectionError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except TokenDecryptionError as exc:
+        raise HTTPException(status_code=503, detail="Cannot decrypt the connection token") from exc
+    except (DroneError, GiteaError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not search {kind.value} repositories. Check the connection and token.",
+        ) from exc
 
 
 @router.get("/{connection_id}", response_model=ConnectionResponse)
