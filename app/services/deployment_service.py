@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import Settings
+from app.db.models.ci import CIPolicy
 from app.db.models.orchestration import (
     ACTIVE_PROMOTION_STATUSES,
     Deployment,
@@ -30,6 +31,7 @@ from app.integrations.drone.exceptions import (
     DroneUnexpectedResponseError,
 )
 from app.integrations.drone.schemas import DroneBuild
+from app.services.ci_policy import ci_dispatch_allowed, stages_succeeded
 from app.services.component_registry import ComponentRegistry
 from app.services.drone_build_service import BuildNotPromotableError, DroneBuildService
 from app.services.planned_deployment_guard import verify_planned_deployment
@@ -171,6 +173,9 @@ class DeploymentService:
         # slot, so a deployment has to remember which one it was created against
         # even if the component is later pointed somewhere else.
         connection = self.registry.drone_connection(component)
+        policy = self.db.scalar(
+            select(CIPolicy).where(CIPolicy.component_id == component.id, CIPolicy.target == target)
+        )
         deployment = Deployment(
             release_bundle_id=bundle.id if bundle else None,
             release_bundle=bundle,
@@ -184,6 +189,7 @@ class DeploymentService:
             commit_sha=build.commit_sha,
             branch=build.branch,
             target=target,
+            required_promotion_stages=list(policy.promotion_stages) if policy else None,
             status=DeploymentStatus.WAITING.value,
             current_stage=None,
             requested_by=requested_by,
@@ -268,6 +274,16 @@ class DeploymentService:
             return deployment
 
         try:
+            if not ci_dispatch_allowed(self.db, deployment, component, self.registry):
+                self.fail(
+                    deployment,
+                    failed_stage=stage,
+                    error_code="CI_DISPATCH_REJECTED",
+                    error_message="CI authorization or component configuration changed",
+                    release=release,
+                )
+                self.db.commit()
+                return deployment
             verify_planned_deployment(self.db, self.settings, self.builds, deployment, component)
             promotion = self.builds.promote(
                 component, deployment.source_build_number, deployment.target
@@ -295,7 +311,7 @@ class DeploymentService:
                     deployment,
                     failed_stage=stage,
                     error_code=exc.error_code,
-                    error_message=str(exc),
+                    error_message="Drone promotion request rejected",
                     release=release,
                 )
             self.db.commit()
@@ -327,7 +343,7 @@ class DeploymentService:
             event_type=WorkflowEventType.PROMOTION_UNCONFIRMED.value,
             status=deployment.status,
             error_code=exc.error_code,
-            message=str(exc),
+            message="Drone promotion outcome is unknown",
         )
         logger.warning(
             "Promotion outcome unknown deployment_id=%s component=%s repo=%s/%s "
@@ -409,7 +425,7 @@ class DeploymentService:
         error_code = code or getattr(exc, "error_code", "DRONE_UNAVAILABLE")
         first_occurrence = deployment.poll_error_code != error_code
         deployment.poll_error_code = error_code
-        deployment.poll_error_message = str(exc) or exc.__class__.__name__
+        deployment.poll_error_message = "Drone polling could not confirm deployment state"
         deployment.poll_failure_count = (deployment.poll_failure_count or 0) + 1
         deployment.updated_at = utc_now()
         if first_occurrence:
@@ -545,7 +561,20 @@ class DeploymentService:
             deployment.status = DeploymentStatus.DEPLOYING.value
             deployment.updated_at = utc_now()
         elif status == "success":
-            self.succeed(deployment, release=release)
+            if deployment.required_promotion_stages is not None and not (
+                build.is_promotion_of(deployment.source_build_number, deployment.target)
+                and build.commit_sha == deployment.commit_sha
+                and stages_succeeded(build, deployment.required_promotion_stages, deployment=True)
+            ):
+                self.fail(
+                    deployment,
+                    failed_stage=stage,
+                    error_code="PROMOTION_STAGES_REJECTED",
+                    error_message="Required deployment stages did not execute successfully",
+                    release=release,
+                )
+            else:
+                self.succeed(deployment, release=release)
         else:
             error_code = "DRONE_BUILD_KILLED" if status == "killed" else "DRONE_BUILD_FAILED"
             self.fail(

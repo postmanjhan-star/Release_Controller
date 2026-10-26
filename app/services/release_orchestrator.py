@@ -101,32 +101,35 @@ class ReleaseOrchestrator:
         registered = component
         target = _target_for(registered, payload.target or project_default_target(registered))
         build = self.builds.validate_promotable(registered, build_number)
-        self.deployments.assert_not_duplicate(registered, build_number, target)
-        deployment = self.deployments.create(
-            registered,
-            build,
-            target,
-            requested_by=payload.requested_by,
+        deployment = self.prepare_standalone(
+            registered, build, target, requested_by=payload.requested_by, attachment=attachment
         )
-        apply_attachment(deployment, attachment)
-        validate_stage = _validate_stage(registered.key)
-        self.events.append(
-            deployment=deployment,
-            stage=validate_stage,
-            event_type=WorkflowEventType.STAGE_STARTED.value,
-        )
-        self.events.append(
-            deployment=deployment,
-            stage=validate_stage,
-            event_type=WorkflowEventType.STAGE_SUCCEEDED.value,
-            status=DeploymentStatus.PROMOTING.value,
-        )
-        # Persist the intent before going upstream.  promote() claims the
-        # deployment and commits that claim before it calls Drone, so no write
-        # lock is held across the network round trip.
         self.db.commit()
         self.deployments.promote(deployment)
         return self.deployments.get(deployment.id)
+
+    def prepare_standalone(
+        self,
+        component: ProjectComponent,
+        build: DroneBuild,
+        target: str,
+        *,
+        requested_by: str | None = None,
+        attachment: UploadedAttachment | None = None,
+    ) -> Deployment:
+        """Record a validated intent; caller commits any inbox link before promotion."""
+        self.deployments.assert_not_duplicate(component, build.number, target)
+        deployment = self.deployments.create(component, build, target, requested_by=requested_by)
+        apply_attachment(deployment, attachment)
+        stage = _validate_stage(component.key)
+        for event_type in (WorkflowEventType.STAGE_STARTED, WorkflowEventType.STAGE_SUCCEEDED):
+            self.events.append(
+                deployment=deployment,
+                stage=stage,
+                event_type=event_type.value,
+                status=DeploymentStatus.WAITING.value,
+            )
+        return deployment
 
     def create_bundle(
         self,
@@ -391,7 +394,10 @@ class ReleaseOrchestrator:
         deployment = self.deployments.get(deployment_id)
         if deployment.release_bundle_id is not None:
             raise DuplicatePromotionError("Refresh the parent release bundle instead")
-        self.deployments.refresh(deployment)
+        if deployment.status == DeploymentStatus.WAITING.value:
+            self.deployments.promote(deployment)
+        else:
+            self.deployments.refresh(deployment)
         if deployment.status == DeploymentStatus.SUCCESS.value:
             self.events.append(
                 deployment=deployment,

@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     auth_session_cookie_name: str = "release_controller_session"
     auth_session_hours: int = Field(default=8, ge=1, le=720)
     auth_cookie_secure: bool = True
+    ci_source_wait_seconds: int = Field(default=3600, ge=1)
     deployment_timeout_seconds: int = 1800
     # Recovery. The worker drives every non-terminal deployment, not just the ones
     # a schedule created, so a deployment no longer depends on a browser tab

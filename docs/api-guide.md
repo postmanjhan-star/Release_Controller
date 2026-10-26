@@ -11,7 +11,9 @@ Base path 為 `/api/v1`。完整欄位與回應以執行中服務的 `/docs`、`
 - `/health` 不需登入；其餘業務 API 在 `AUTH_ENABLED=true` 時需要有效的 session cookie。
 - `PROJECT_ADMIN_WRITES=true` 時，專案與連線的寫入另要求 Gitea 管理員。
 
-登入後可在同一瀏覽器使用 `/docs`。尚無 Bearer service token 登入方式。
+登入後可在同一瀏覽器使用 `/docs`。一般業務 API 維持 session 驗證；
+獨立 CI Bearer token 僅可呼叫 `/api/v1/ci/deployments` 的受理及狀態查詢端點，
+設定與契約見 [CI 接入說明](ci-integration.md#ci-service-api-與-wordpress-mcp-自動部署)。
 本機 curl 測試可使用 `APP_ENV=development`、`AUTH_ENABLED=false`；正式環境不可停用驗證。
 啟用驗證時，核准、拒絕與部署請求的操作者由 session 決定，不能藉由 body 偽造。
 

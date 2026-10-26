@@ -11,7 +11,7 @@
 
 ## 目前限制
 
-尚無細部角色權限、service token、Gitea webhook 接收及驗章。
+尚無一般使用者的細部角色權限、Gitea webhook 接收及驗章。CI service token 僅適用於專用 CI API。
 除了選用的專案／連線管理員限制，release、promotion、核准、排程及發布等操作未細分權限。
 登入驗證也不代表每次部署都經人工核准；舊版核准與直接 promotion 是獨立流程。
 
@@ -41,5 +41,32 @@ Compose 的綁定位址預設為 loopback，依實際 proxy / runner 網路配�
 `/data` 與備份含部署歷程、登入資料及附件，應限制存取並採取適當的備份保護。
 資料庫備份與 `APP_SECRET_KEY` 分開保存，還原方式見[更新與維運](operations.md)。
 
-如果後續要加入 CI service token、webhook 或角色權限，需要先實作驗證與授權機制；
-目前不能直接以 `Authorization: Bearer ...` 呼叫 Controller 作為服務登入。
+## CI service token 權限界線
+
+CI 使用獨立的 `ci_service_tokens`，以 48 bytes 隨機資料產生高熵 `rc_ci_...` token；
+資料庫只保存 SHA-256 hash。伺服器端 CLI 建立時只輸出一次完整 token，沒有讀回功能。
+每個 token 有精確的 project ID、component ID、target、來源 branch、到期日及撤銷時間。
+建立、policy 設定與撤銷僅提供伺服器端 CLI，需具備 Controller 容器／資料庫操作權限，
+沒有公開 token 管理 API。操作命令見 [CI 接入說明](ci-integration.md#伺服器端設定migration-與-token)。
+
+`POST /api/v1/ci/deployments` 及 `GET /api/v1/ci/deployments/{request_id}` 每次都驗證
+Bearer token 有效期、撤銷狀態與精確資源範圍，即使開發環境 `AUTH_ENABLED=false` 亦然。
+狀態查詢包含 branch scope；輪替後同範圍的新 token 可追蹤舊工作。
+CI token 不能建立人員 session、讀取其他專案、管理專案／連線、操作排程、Publish 或一般部署 API。
+既有 Gitea session 的權限與 `PROJECT_ADMIN_WRITES` 行為保持原樣；CI bearer 不會被當作 session。
+
+來源 branch 及必要 stages 是伺服器端 CI policy，CI 呼叫端無法覆寫。repository、連線與 SHA
+由 registry／Drone 解析，不接受任意 URL、repository、部署程式或 shell。停用的元件、封存的
+專案與未設定 policy 會被拒絕，不會由 CI 自動建立。受理後更換元件 repository／連線會讓
+尚未部署的工作失敗；送出 promotion 前共用追蹤器亦再檢查 token、期限、元件與連線。
+撤銷不能取消已被 Drone 接收的部署；Controller 會繼續追蹤其結果。
+
+完整 token 只放在 Drone secret `release_controller_ci_token`；URL 放在
+`release_controller_url`。不要將 token 放在 URL query、CLI 參數、repository、shell trace、
+HTTP debug header dump 或 reverse proxy access log。接入範例拒絕重新導向，防止洩漏 Bearer。
+CLI 首次輸出屬機密，請在可信終端直接存入 secret manager；操作歷程只保存 token 識別 ID。
+CI API 格式錯誤不回顯輸入、非預期錯誤只回固定訊息；worker 及部署事件使用安全固定錯誤
+訊息，不保存上游 exception／response body。Proxy／Drone runner 也須禁止記錄 Authorization header。
+
+CI 工作與事件使用資料庫持久化，與既有部署事件互相連結，但不是獨立的外部防竄改稽核服務。
+Token 輪替不需更換 `APP_SECRET_KEY`；備份仍應受保護，因為包含上游加密憑證與部署歷程。

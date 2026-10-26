@@ -3,6 +3,7 @@ import logging
 
 from app.core.config import Settings
 from app.domain.orchestration.value_objects import ActorSource
+from app.services.ci_deployment_service import CIDeploymentRunner
 from app.services.notification_service import NotificationService
 from app.services.recovery_service import RecoveryService
 from app.services.release_orchestrator import ReleaseOrchestrator
@@ -16,6 +17,7 @@ class BackgroundWorker:
         self.session_factory = session_factory
         self.schedule_runner = ScheduleRunner(session_factory, builds_factory, settings)
         self.settings = settings
+        self.ci_runner = CIDeploymentRunner(session_factory, builds_factory, settings)
         self.recovery = RecoveryService(
             session_factory,
             lambda db: ReleaseOrchestrator(
@@ -30,6 +32,7 @@ class BackgroundWorker:
 
     def reconcile_on_startup(self) -> dict[str, int]:
         """One recovery pass before serving, so a restart resumes rather than strands."""
+        self.ci_runner.run()
         if not self.settings.recovery_enabled:
             return {}
         summary = self.recovery.run()
@@ -38,6 +41,7 @@ class BackgroundWorker:
         return summary
 
     def tick(self) -> None:
+        self.ci_runner.run()
         self.schedule_runner.run_due()
         if self.settings.recovery_enabled:
             # Supersedes the old schedule-only refresh: this advances every

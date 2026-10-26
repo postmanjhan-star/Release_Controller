@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     DDL,
+    JSON,
     DateTime,
     ForeignKey,
     Index,
@@ -207,6 +208,7 @@ class Deployment(Base):
     drone_repository: Mapped[str] = mapped_column(String(255), nullable=False)
     source_build_number: Mapped[int] = mapped_column(Integer, nullable=False)
     promotion_build_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    required_promotion_stages: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     commit_sha: Mapped[str] = mapped_column(String(64), nullable=False)
     branch: Mapped[str] = mapped_column(String(255), nullable=False)
     target: Mapped[str] = mapped_column(String(100), nullable=False)

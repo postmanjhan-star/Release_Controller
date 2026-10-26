@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.ci import router as ci_router
 from app.api.routes.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -59,9 +60,13 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(Exception)
     async def unexpected_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unexpected exception", exc_info=exc)
+        if _request.url.path.startswith("/api/v1/ci/"):
+            logger.error("CI request failed")
+        else:
+            logger.exception("Unexpected exception", exc_info=exc)
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
+    application.include_router(ci_router, prefix="/api/v1")
     application.include_router(health_router)
     application.include_router(auth_router, prefix="/api/v1")
     application.include_router(api_router, prefix="/api/v1")
