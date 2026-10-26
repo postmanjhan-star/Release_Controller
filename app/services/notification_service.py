@@ -419,9 +419,9 @@ class NotificationService:
                 row.last_error = None
                 row.claimed_at = None
                 sent += 1
-            except Exception as exc:
+            except Exception:
                 row.status = EmailDeliveryStatus.FAILED.value
-                row.last_error = (str(exc) or exc.__class__.__name__)[:2000]
+                row.last_error = "SMTP delivery failed; check SMTP configuration and server logs."
                 row.claimed_at = None
                 delay = self.settings.smtp_retry_seconds * (2 ** (row.attempts - 1))
                 row.next_attempt_at = utc_now() + timedelta(seconds=delay)

@@ -219,3 +219,25 @@ def test_cli_returns_failure_without_reporting_success(portainer, monkeypatch, c
     output = capsys.readouterr()
     assert "HTTP 404: Environment not found" in output.err
     assert "request completed" not in output.out
+
+
+def test_api_error_messages_cannot_reflect_ddns_or_credentials_into_ci(
+    portainer, monkeypatch, capsys
+):
+    hostname = "private-tenant." + "duckdns.org"
+    portainer.replies["/api/endpoints/3"] = (
+        403,
+        {
+            "message": f"https://{hostname}/api token=unrelated-synthetic-secret",
+            "details": {"env": "private-environment"},
+        },
+    )
+    monkeypatch.setattr(deployment.sys, "argv", ["portainer_redeploy"])
+    monkeypatch.setattr(deployment.os, "environ", portainer.environment)
+    with pytest.raises(SystemExit) as error:
+        deployment.main()
+    assert error.value.code == 1
+    output = capsys.readouterr()
+    for private_value in (hostname, "unrelated-synthetic-secret", "private-environment"):
+        assert private_value not in output.out + output.err
+    assert "HTTP 403" in output.err

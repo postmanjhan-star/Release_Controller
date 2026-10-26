@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import logging
 import sys
 from contextlib import asynccontextmanager
 
@@ -16,6 +15,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
+from app.core.logging import configure_logging
 from app.mcp.security import BearerAuthMiddleware
 from app.mcp.service import MCPService
 from app.mcp.tools import TOOLS
@@ -151,7 +151,18 @@ def main():
     if not settings.mcp_enabled:
         raise SystemExit("MCP is disabled. Set MCP_ENABLED=true to start it.")
     # stdout belongs exclusively to the MCP protocol in stdio mode.
-    logging.basicConfig(level=settings.log_level, stream=sys.stderr, force=True)
+    configure_logging(
+        settings.log_level,
+        stream=sys.stderr,
+        secrets=(
+            settings.drone_token,
+            settings.gitea_token,
+            settings.app_secret_key,
+            settings.gitea_oauth_client_secret,
+            settings.smtp_password,
+            settings.mcp_api_token,
+        ),
+    )
     server = create_server(MCPService(settings, SessionLocal))
     if settings.mcp_transport == "stdio":
         asyncio.run(run_stdio(server))
@@ -159,7 +170,10 @@ def main():
         import uvicorn
 
         uvicorn.run(
-            create_http_app(server, settings), host=settings.mcp_host, port=settings.mcp_port
+            create_http_app(server, settings),
+            host=settings.mcp_host,
+            port=settings.mcp_port,
+            log_config=None,
         )
 
 

@@ -20,7 +20,17 @@ from app.services.drone_build_service import DroneBuildService
 from app.services.upstream_clients import RegistryDroneClients
 
 settings = get_settings()
-configure_logging(settings.log_level)
+configure_logging(
+    settings.log_level,
+    secrets=(
+        settings.drone_token,
+        settings.gitea_token,
+        settings.app_secret_key,
+        settings.gitea_oauth_client_secret,
+        settings.smtp_password,
+        settings.mcp_api_token,
+    ),
+)
 logger = logging.getLogger(__name__)
 static_directory = Path(__file__).resolve().parent / "static"
 

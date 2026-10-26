@@ -70,3 +70,17 @@ CI API 格式錯誤不回顯輸入、非預期錯誤只回固定訊息；worker 
 
 CI 工作與事件使用資料庫持久化，與既有部署事件互相連結，但不是獨立的外部防竄改稽核服務。
 Token 輪替不需更換 `APP_SECRET_KEY`；備份仍應受保護，因為包含上游加密憑證與部署歷程。
+
+## 文件、診斷與日誌的隱私
+
+文件與 CI 範例只使用範例網域、`<CONTROLLER_URL>` 或 secret／環境變數，不放入真實 DDNS。
+專案協作規範見 `agent.md`；測試會掃描公開文件與設定範例，失敗時只列出檔案及行號。
+真實連線資訊保留在 Git 忽略的私人設定與受保護資料庫，不透過文件公開。
+
+API 與 MCP 共用日誌遮蔽，涵蓋最終格式化的訊息、參數、例外堆疊與 Uvicorn／HTTP client
+日誌；遮蔽 HTTP(S) URL、常見 DDNS hostname、Authorization／Cookie／API key、登入 callback
+code／state 及已設定的服務密鑰。MCP stdio 模式繼續將日誌送到 stderr。
+排程與 SMTP 失敗記錄使用固定診斷訊息；Portainer CI helper 僅輸出允許的固定錯誤文字，
+避免上游把私人網址或密鑰放進錯誤訊息後被再次輸出。
+此保護不會移除具權限使用者在管理介面操作所需的連線設定；外部 reverse proxy 與 runner
+仍需個別禁止記錄 secret、Authorization header 與原始環境變數。

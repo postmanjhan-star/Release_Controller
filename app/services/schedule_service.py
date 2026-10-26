@@ -230,11 +230,13 @@ class ScheduleRunner:
                     schedule.deployment_id = result.id
                 schedule.status = ScheduleStatus.SUCCEEDED.value
                 schedule.error_message = None
-            except Exception as exc:
+            except Exception:
                 db.rollback()
                 schedule = db.get(DeploymentSchedule, schedule_id)
                 schedule.status = ScheduleStatus.FAILED.value
-                schedule.error_message = str(exc)[:2000] or exc.__class__.__name__
+                schedule.error_message = (
+                    "Scheduled deployment failed; inspect the deployment history."
+                )
                 logger.exception("Scheduled deployment failed schedule_id=%s", schedule_id)
             schedule.finished_at = utc_now()
             schedule.updated_at = schedule.finished_at

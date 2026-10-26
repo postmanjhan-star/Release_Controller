@@ -78,17 +78,25 @@ class Portainer:
                 body = response.read()
         except HTTPError as exc:
             uncertain = method == "PUT" and exc.code in (502, 503, 504)
-            # Stack responses contain environment secrets. Only print the API's
-            # top-level error message, never entire responses or debug details.
+            # Even a top-level API message can reflect URLs and credentials.
+            # Only known, fixed diagnostics may reach CI output.
             try:
                 message = json.loads(exc.read()).get("message", "")
+                if message not in (
+                    "Resource not found",
+                    "Environment not found",
+                    "Stack not found",
+                    "Unauthorized",
+                    "Forbidden",
+                    "Upstream timeout",
+                ):
+                    message = "Portainer returned an error; inspect server-side logs."
             except (ValueError, AttributeError):
                 message = (
                     "Gateway did not return a JSON response."
                     if uncertain
                     else "Non-JSON response; check portainer_url and reverse proxy routing."
                 )
-            message = str(message).replace(self.token, "[redacted]")[:500]
             if uncertain:
                 raise DeploymentOutcomeUnknown(
                     f"{method} {path}: HTTP {exc.code}: {message} "
