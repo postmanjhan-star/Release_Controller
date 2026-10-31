@@ -1361,10 +1361,7 @@ describe("專案設定", () => {
     );
   }
 
-  async function searchRepositories() {
-    (
-      document.querySelector("#project-repository-search") as HTMLButtonElement
-    ).click();
+  async function repositoryOptions() {
     await waitFor(() =>
       expect(
         document.querySelector("#project-repository-results"),
@@ -1375,11 +1372,31 @@ describe("專案設定", () => {
     ) as HTMLSelectElement;
   }
 
-  it("從 Drone 搜尋選單帶入專案資料，仍可修改後建立", async () => {
+  async function searchRepositories() {
+    (
+      document.querySelector("#project-repository-search") as HTMLButtonElement
+    ).click();
+    return repositoryOptions();
+  }
+
+  it("開啟新增專案就載入 Drone 選單，選取後自動帶入並可修改後建立", async () => {
     await mountApp();
     await openProjects();
     (document.querySelector("#new-project") as HTMLButtonElement).click();
-    const results = await searchRepositories();
+    const results = await repositoryOptions();
+    const requests = calls.filter((call) =>
+      call.path.startsWith("/api/v1/connections/repositories?"),
+    );
+    expect(requests).toHaveLength(1);
+    expect(
+      Object.fromEntries(
+        new URL(requests[0].path, "https://controller.test").searchParams,
+      ),
+    ).toEqual({
+      kind: "drone",
+      q: "",
+      page: "1",
+    });
     results.value = "0";
     fireEvent.change(results);
     const form = document.querySelector("#project-form") as HTMLFormElement;
@@ -1416,9 +1433,11 @@ describe("專案設定", () => {
       target: { value: "engine & api" },
     });
     const results = await searchRepositories();
-    const request = calls.find((call) =>
-      call.path.startsWith("/api/v1/connections/repositories?"),
-    )!;
+    const request = [...calls]
+      .reverse()
+      .find((call) =>
+        call.path.startsWith("/api/v1/connections/repositories?"),
+      )!;
     const params = new URL(request.path, "https://controller.test")
       .searchParams;
     expect(Object.fromEntries(params)).toEqual({
@@ -1438,7 +1457,7 @@ describe("專案設定", () => {
     await mountApp();
     await openProjects();
     (document.querySelector("#new-project") as HTMLButtonElement).click();
-    const results = await searchRepositories();
+    const results = await repositoryOptions();
     (
       document.querySelector("#project-repository-more") as HTMLButtonElement
     ).click();
@@ -1456,6 +1475,49 @@ describe("專案設定", () => {
     expect(results).toBeDisabled();
     expect(results.options).toHaveLength(1);
     expect(field(form, "name").value).toBe("worker");
+    await repositoryOptions();
+    expect(results.options).toHaveLength(2);
+    expect(results).not.toHaveTextContent("acme/worker");
+    expect(field(form, "name").value).toBe("worker");
+  });
+
+  it("切換來源或對應連線自動更新選單，其他來源連線不觸發載入", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#new-project") as HTMLButtonElement).click();
+    await repositoryOptions();
+    const repositoryCalls = () =>
+      calls.filter((call) =>
+        call.path.startsWith("/api/v1/connections/repositories?"),
+      );
+    fireEvent.change(document.querySelector("#project-gitea-connection")!, {
+      target: { value: "conn-gitea" },
+    });
+    expect(repositoryCalls()).toHaveLength(1);
+    fireEvent.change(document.querySelector("#project-repository-source")!, {
+      target: { value: "gitea" },
+    });
+    await repositoryOptions();
+    expect(
+      Object.fromEntries(
+        new URL(repositoryCalls()[1].path, "https://controller.test")
+          .searchParams,
+      ),
+    ).toEqual({
+      kind: "gitea",
+      q: "",
+      page: "1",
+      connection_id: "conn-gitea",
+    });
+    fireEvent.change(document.querySelector("#project-gitea-connection")!, {
+      target: { value: "" },
+    });
+    const results = await repositoryOptions();
+    expect(repositoryCalls()).toHaveLength(3);
+    fireEvent.change(results, { target: { value: "0" } });
+    const form = document.querySelector("#project-form") as HTMLFormElement;
+    expect(field(form, "name").value).toBe("SMT.Assistant");
+    expect(field(form, "gitea_connection_id").value).toBe("conn-gitea");
   });
 
   it("搜尋失敗仍保留手動輸入並可重試", async () => {
@@ -1485,23 +1547,21 @@ describe("專案設定", () => {
   it("來源切換後忽略較晚回傳的搜尋結果", async () => {
     await mountApp();
     await openProjects();
-    (document.querySelector("#new-project") as HTMLButtonElement).click();
     const originalFetch = vi.mocked(fetch).getMockImplementation()!;
     let resolveSearch!: (response: Response) => void;
     const delayed = new Promise<Response>((resolve) => {
       resolveSearch = resolve;
     });
     vi.mocked(fetch).mockImplementation((input, init) =>
-      String(input).includes("/connections/repositories?")
+      String(input).includes("/connections/repositories?kind=drone")
         ? delayed
         : originalFetch(input, init),
     );
-    (
-      document.querySelector("#project-repository-search") as HTMLButtonElement
-    ).click();
+    (document.querySelector("#new-project") as HTMLButtonElement).click();
     fireEvent.change(document.querySelector("#project-repository-source")!, {
       target: { value: "gitea" },
     });
+    await repositoryOptions();
     resolveSearch(
       json({
         connection_id: "conn-drone",
@@ -1517,12 +1577,24 @@ describe("專案設定", () => {
         document.querySelector("#project-repository-search"),
       ).toBeEnabled(),
     );
-    expect(
-      document.querySelector("#project-repository-results"),
-    ).toBeDisabled();
+    expect(document.querySelector("#project-repository-results")).toBeEnabled();
     expect(
       document.querySelector("#project-repository-results"),
     ).not.toHaveTextContent("old/old");
+  });
+
+  it("編輯既有專案不載入 repository 選單", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#edit-project") as HTMLButtonElement).click();
+    expect(
+      document.querySelector("#project-repository-picker"),
+    ).not.toBeVisible();
+    expect(
+      calls.filter((call) =>
+        call.path.startsWith("/api/v1/connections/repositories?"),
+      ),
+    ).toHaveLength(0);
   });
 
   it("列出專案並依部署順序畫出元件", async () => {

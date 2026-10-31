@@ -10,10 +10,11 @@
 3. 新增元件，指定各自的 Drone / Gitea repository、是否啟用與是否需要發布。
 4. 調整元件部署順序並執行專案驗證。
 
-新增專案時可使用 **Fill from Drone / Gitea**：選擇搜尋來源及下方對應連線，輸入
-repository 關鍵字後按 **Search**（留空可列出 repository）。從選單選取結果後，會自動
+新增專案時可使用 **Fill from Drone / Gitea**：開啟視窗即自動載入 repository，
+切換來源或下方對應連線時也會重新載入。直接從 **Repository** 選單選取項目，就會自動
 填入 Key、Name、Description 及實際使用的連線，送出前仍可修改；Key 重複時請自行調整。
-**Load more** 可載入更多結果。搜尋使用伺服器儲存的連線 token，只列出該憑證可存取的
+**Load more** 可載入更多結果；需要篩選時，可輸入關鍵字後按 **Search** 或 Enter。
+搜尋使用伺服器儲存的連線 token，只列出該憑證可存取的
 repository；若尚未設定預設連線，請先指定一組連線。建立後依上述步驟新增部署元件。
 
 連線可由元件覆寫專案設定，未指定時使用同類型預設連線。

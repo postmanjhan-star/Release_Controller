@@ -659,18 +659,18 @@ function SettingsDialogs() {
               <legend>Fill from Drone / Gitea</legend>
               <div className="repository-search-controls">
                 <label>
-                  Search source
+                  Source
                   <select id="project-repository-source" defaultValue="drone">
                     <option value="drone">Drone CI</option>
                     <option value="gitea">Gitea</option>
                   </select>
                 </label>
                 <label>
-                  Repository keyword
+                  Repository keyword (optional)
                   <input
                     id="project-repository-query"
                     maxLength={200}
-                    placeholder="Search repositories…"
+                    placeholder="Filter repositories…"
                   />
                 </label>
                 <button
@@ -688,7 +688,7 @@ function SettingsDialogs() {
                   disabled
                   defaultValue=""
                 >
-                  <option value="">Search to choose a repository</option>
+                  <option value="">Loading repositories…</option>
                 </select>
               </label>
               <p
@@ -697,8 +697,8 @@ function SettingsDialogs() {
                 role="status"
                 aria-live="polite"
               >
-                Uses the selected connection below. Choose a result to fill Key,
-                Name and Description.
+                Repositories load from the selected connection below. Choose one
+                to fill Key, Name and Description.
               </p>
               <button
                 type="button"

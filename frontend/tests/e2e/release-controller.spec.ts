@@ -779,11 +779,12 @@ test("redirects the legacy schedules view and selects a pending schedule", async
 });
 
 for (const source of ["drone", "gitea"] as const) {
-  test(`creates a project from a ${source} repository search`, async ({
+  test(`creates a project by choosing a ${source} repository without searching`, async ({
     page,
   }) => {
     let created: (typeof projectResponse.items)[number] | null = null;
     let submitted: Record<string, unknown> | null = null;
+    const repositoryRequests: URLSearchParams[] = [];
     await page.route("**/api/v1/projects?*", (route) =>
       route.fulfill({
         json: {
@@ -813,12 +814,12 @@ for (const source of ["drone", "gitea"] as const) {
     });
     await page.route("**/api/v1/connections/repositories?*", async (route) => {
       const params = new URL(route.request().url()).searchParams;
-      expect(params.get("kind")).toBe(source);
-      expect(params.get("connection_id")).toBe(`${source}-default`);
-      expect(params.get("q")).toBe("SMT & tools");
+      repositoryRequests.push(params);
+      const kind = params.get("kind");
+      expect(params.get("q")).toBe("");
       await route.fulfill({
         json: {
-          connection_id: `${source}-default`,
+          connection_id: `${kind}-default`,
           has_more: false,
           items: [
             {
@@ -836,14 +837,37 @@ for (const source of ["drone", "gitea"] as const) {
       .getByRole("button", { name: "New project", exact: true })
       .click();
     await expect(page.locator("#project-repository-more")).not.toBeVisible();
+    await expect(page.locator("#project-repository-results")).toBeEnabled();
     await page.locator("#project-repository-source").selectOption(source);
-    await page
-      .locator(`#project-${source}-connection`)
-      .selectOption(`${source}-default`);
-    await page.locator("#project-repository-query").fill("SMT & tools");
-    await page.locator("#project-repository-query").press("Enter");
+    await expect(page.locator("#project-repository-results")).toBeEnabled();
+    await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname.endsWith("/connections/repositories") &&
+          url.searchParams.get("kind") === source &&
+          url.searchParams.get("connection_id") === `${source}-default`
+        );
+      }),
+      page
+        .locator(`#project-${source}-connection`)
+        .selectOption(`${source}-default`),
+    ]);
     await expect(page.locator("#project-repository-results")).toBeEnabled();
     await expect(page.locator("#project-repository-more")).not.toBeVisible();
+    expect(Object.fromEntries(repositoryRequests[0])).toEqual({
+      kind: "drone",
+      q: "",
+      page: "1",
+    });
+    expect(
+      Object.fromEntries(repositoryRequests[repositoryRequests.length - 1]),
+    ).toEqual({
+      kind: source,
+      q: "",
+      page: "1",
+      connection_id: `${source}-default`,
+    });
     expect(submitted).toBeNull();
     await page
       .locator("#project-repository-results")
