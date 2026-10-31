@@ -1801,74 +1801,106 @@ function fillConnectionOptions(selector: string, kind: string, chosen: string | 
   field.value = chosen || '';
 }
 
-let repositorySearchVersion = 0;
-let repositorySearchPage = 0;
-let repositoryMatches: RepositorySearchItem[] = [];
-let repositoryConnectionId = '';
+type RepositoryPickerScope = 'project' | 'component';
+interface RepositoryPickerState {
+  version: number;
+  page: number;
+  matches: RepositorySearchItem[];
+  connectionId: string;
+}
+const repositoryPickers: Record<RepositoryPickerScope, RepositoryPickerState> = {
+  project: { version: 0, page: 0, matches: [], connectionId: '' },
+  component: { version: 0, page: 0, matches: [], connectionId: '' },
+};
 
-function resetRepositorySearch() {
-  repositorySearchVersion += 1;
-  repositorySearchPage = 0;
-  repositoryMatches = [];
-  repositoryConnectionId = '';
-  const results = document.querySelector('#project-repository-results');
+function pickerProject(): Project | undefined {
+  return state.projects.find((project) => project.key === elements.componentDialog.dataset.projectKey);
+}
+
+function resetRepositorySearch(scope: RepositoryPickerScope = 'project') {
+  const picker = repositoryPickers[scope];
+  picker.version += 1;
+  picker.page = 0;
+  picker.matches = [];
+  picker.connectionId = '';
+  const results = document.querySelector(`#${scope}-repository-results`);
   results.replaceChildren(new Option('Loading repositories…', ''));
   results.disabled = true;
-  document.querySelector('#project-repository-more').hidden = true;
-  document.querySelector('#project-repository-more').disabled = false;
-  document.querySelector('#project-repository-search').disabled = false;
-  document.querySelector('#project-repository-status').textContent = 'Repositories load from the selected connection below. Choose one to fill Key, Name and Description.';
+  document.querySelector(`#${scope}-repository-more`).hidden = true;
+  document.querySelector(`#${scope}-repository-more`).disabled = false;
+  document.querySelector(`#${scope}-repository-search`).disabled = false;
+  document.querySelector(`#${scope}-repository-status`).textContent = 'Repositories load from the selected connection below. Choose one to fill the details.';
 }
 
-function reloadProjectRepositories() {
-  if (!elements.projectDialog.open || elements.projectDialog.dataset.projectKey) return;
-  resetRepositorySearch();
-  void searchProjectRepositories();
+function reloadRepositories(scope: RepositoryPickerScope) {
+  const dialog = scope === 'project' ? elements.projectDialog : elements.componentDialog;
+  if (!dialog.open || dialog.dataset[`${scope}Key`]) return;
+  resetRepositorySearch(scope);
+  void searchRepositories(scope);
 }
 
-async function searchProjectRepositories(more = false) {
-  const version = ++repositorySearchVersion;
+async function searchRepositories(scope: RepositoryPickerScope, more = false, suggest = false) {
+  const picker = repositoryPickers[scope];
+  const dialog = scope === 'project' ? elements.projectDialog : elements.componentDialog;
+  const version = ++picker.version;
   const run = generation;
-  const kind = document.querySelector('#project-repository-source').value;
-  const connectionId = more ? repositoryConnectionId : document.querySelector(`#project-${kind}-connection`).value;
-  const query = document.querySelector('#project-repository-query').value.trim();
-  const page = more ? repositorySearchPage + 1 : 1;
+  const kind = document.querySelector(`#${scope}-repository-source`).value;
+  let connectionId = more ? picker.connectionId : document.querySelector(`#${scope}-${kind}-connection`).value;
+  if (!more && !connectionId && scope === 'component') {
+    const project = pickerProject();
+    connectionId = kind === 'drone' ? project?.drone_connection_id : project?.gitea_connection_id;
+  }
+  const query = document.querySelector(`#${scope}-repository-query`).value.trim();
+  const page = more ? picker.page + 1 : 1;
   const params = new URLSearchParams({ kind, q: query, page: String(page) });
   if (connectionId) params.set('connection_id', connectionId);
-  const button = document.querySelector('#project-repository-search');
-  const moreButton = document.querySelector('#project-repository-more');
-  const results = document.querySelector('#project-repository-results');
-  const status = document.querySelector('#project-repository-status');
+  const button = document.querySelector(`#${scope}-repository-search`);
+  const moreButton = document.querySelector(`#${scope}-repository-more`);
+  const results = document.querySelector(`#${scope}-repository-results`);
+  const status = document.querySelector(`#${scope}-repository-status`);
   button.disabled = true;
   moreButton.disabled = true;
   results.disabled = true;
   status.textContent = 'Loading repositories…';
   try {
     const response = await typedApi<RepositorySearchResponse>(`${API}/connections/repositories?${params}`);
-    if (version !== repositorySearchVersion || run !== generation || !elements.projectDialog.open) return;
-    repositorySearchPage = page;
-    repositoryConnectionId = response.connection_id;
-    repositoryMatches = more ? [...repositoryMatches, ...response.items] : response.items;
+    if (version !== picker.version || run !== generation || !dialog.open) return;
+    picker.page = page;
+    picker.connectionId = response.connection_id;
+    picker.matches = more ? [...picker.matches, ...response.items] : response.items;
     results.replaceChildren(
-      new Option(repositoryMatches.length ? 'Choose a repository' : 'No repositories found', ''),
-      ...repositoryMatches.map((item, index) => new Option(item.full_name, String(index))),
+      new Option(picker.matches.length ? 'Choose a repository' : 'No repositories found', ''),
+      ...picker.matches.map((item, index) => new Option(item.full_name, String(index))),
     );
-    results.disabled = repositoryMatches.length === 0;
+    results.disabled = picker.matches.length === 0;
     moreButton.hidden = !response.has_more;
-    status.textContent = repositoryMatches.length
-      ? `${repositoryMatches.length} repositories found. Choose one to fill the project details.`
+    status.textContent = picker.matches.length
+      ? `${picker.matches.length} repositories found. Choose one to fill the details.`
       : 'No repositories found. Try another keyword or connection.';
+    if (scope === 'component' && suggest && !response.has_more) {
+      const project = pickerProject();
+      const matching = picker.matches.filter((item) =>
+        [project?.key, project?.name].some((name) => name?.toLowerCase() === item.name.toLowerCase()),
+      );
+      const form = document.querySelector('#component-form') as HTMLFormElement;
+      const untouched = ['key', 'display_name', 'drone_owner', 'drone_repo', 'gitea_owner', 'gitea_repo']
+        .every((name) => !(form.elements.namedItem(name) as HTMLInputElement).value);
+      if (matching.length === 1 && untouched) {
+        results.value = String(picker.matches.indexOf(matching[0]));
+        fillComponentFromRepository();
+      }
+    }
   } catch (error) {
-    if (version !== repositorySearchVersion || run !== generation || !elements.projectDialog.open) return;
+    if (version !== picker.version || run !== generation || !dialog.open) return;
     if (!more) {
-      repositoryMatches = [];
+      picker.matches = [];
       results.replaceChildren(new Option('Unable to load repositories', ''));
       moreButton.hidden = true;
     }
-    results.disabled = repositoryMatches.length === 0;
+    results.disabled = picker.matches.length === 0;
     status.textContent = error.message;
   } finally {
-    if (version === repositorySearchVersion && run === generation) {
+    if (version === picker.version && run === generation) {
       button.disabled = false;
       moreButton.disabled = false;
     }
@@ -1877,7 +1909,7 @@ async function searchProjectRepositories(more = false) {
 
 function fillProjectFromRepository() {
   const value = document.querySelector('#project-repository-results').value;
-  const repository = value === '' ? null : repositoryMatches[Number(value)];
+  const repository = value === '' ? null : repositoryPickers.project.matches[Number(value)];
   if (!repository) return;
   const form = document.querySelector('#project-form') as HTMLFormElement;
   // Keep the suggested key within the registry's permanent slug constraints.
@@ -1886,7 +1918,7 @@ function fillProjectFromRepository() {
   (form.elements.namedItem('name') as HTMLInputElement).value = repository.name.slice(0, 200);
   (form.elements.namedItem('description') as HTMLTextAreaElement).value = repository.description.slice(0, 2000);
   const kind = document.querySelector('#project-repository-source').value;
-  document.querySelector(`#project-${kind}-connection`).value = repositoryConnectionId;
+  document.querySelector(`#project-${kind}-connection`).value = repositoryPickers.project.connectionId;
   document.querySelector('#project-repository-status').textContent = key
     ? `Filled from ${repository.full_name}. Review the details before creating; add deployment components after creation.`
     : `Filled from ${repository.full_name}. Enter a Key using lowercase letters or digits.`;
@@ -1911,7 +1943,7 @@ function openProjectDialog(project: Project | null) {
   fillConnectionOptions('#project-drone-connection', 'drone', project?.drone_connection_id || null, 'Use the default connection');
   fillConnectionOptions('#project-gitea-connection', 'gitea', project?.gitea_connection_id || null, 'Use the default connection');
   elements.projectDialog.showModal();
-  if (!project) reloadProjectRepositories();
+  if (!project) reloadRepositories('project');
 }
 
 async function saveProject(form: HTMLFormElement) {
@@ -1958,9 +1990,39 @@ async function validateProject(project: Project) {
   }
 }
 
+function fillComponentFromRepository() {
+  const picker = repositoryPickers.component;
+  const value = document.querySelector('#component-repository-results').value;
+  const repository = value === '' ? null : picker.matches[Number(value)];
+  if (!repository) return;
+  const form = document.querySelector('#component-form') as HTMLFormElement;
+  const set = (name: string, value: string) => {
+    (form.elements.namedItem(name) as HTMLInputElement).value = value;
+  };
+  const baseKey = repository.name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 50);
+  const used = new Set(pickerProject()?.components.map((component) => component.key));
+  let key = baseKey;
+  for (let suffix = 2; key && used.has(key); suffix += 1) {
+    const ending = `-${suffix}`;
+    key = `${baseKey.slice(0, 50 - ending.length)}${ending}`;
+  }
+  set('key', key);
+  set('display_name', repository.name.slice(0, 100));
+  for (const kind of ['drone', 'gitea']) {
+    set(`${kind}_owner`, repository.owner);
+    set(`${kind}_repo`, repository.name);
+  }
+  const kind = document.querySelector('#component-repository-source').value;
+  document.querySelector(`#component-${kind}-connection`).value = picker.connectionId;
+  document.querySelector('#component-repository-status').textContent =
+    `Filled from ${repository.full_name}. Review the component details before adding.`;
+}
+
 function openComponentDialog(project: Project, component: ProjectComponent | null) {
   const form = document.querySelector('#component-form') as HTMLFormElement;
   form.reset();
+  resetRepositorySearch('component');
+  document.querySelector('#component-repository-picker').hidden = Boolean(component);
   elements.componentDialog.dataset.projectKey = project.key;
   elements.componentDialog.dataset.componentKey = component?.key || '';
   document.querySelector('#component-dialog-title').textContent = component ? 'Edit component' : 'Add component';
@@ -1987,6 +2049,13 @@ function openComponentDialog(project: Project, component: ProjectComponent | nul
   fillConnectionOptions('#component-drone-connection', 'drone', component?.drone_connection_id || null, 'Inherit from the project');
   fillConnectionOptions('#component-gitea-connection', 'gitea', component?.gitea_connection_id || null, 'Inherit from the project');
   elements.componentDialog.showModal();
+  if (!component) {
+    // Prefer an available provider while preserving each project's connection scope.
+    document.querySelector('#component-repository-source').value =
+      project.drone_connection_id || state.connections.some((connection) => connection.kind === 'drone' && connection.is_default)
+        ? 'drone' : 'gitea';
+    void searchRepositories('component', false, true);
+  }
 }
 
 async function saveComponent(form: HTMLFormElement) {
@@ -2451,28 +2520,30 @@ function bindEvents() {
   document.querySelector('#recipient-form').addEventListener('submit', (event: any) => { event.preventDefault(); createRecipient(event.currentTarget); });
   document.querySelector('#new-project').addEventListener('click', () => openProjectDialog(null));
   document.querySelector('#project-form').addEventListener('submit', (event: any) => { event.preventDefault(); void saveProject(event.currentTarget); });
-  document.querySelector('#project-repository-search').addEventListener('click', () => void searchProjectRepositories());
-  document.querySelector('#project-repository-more').addEventListener('click', () => void searchProjectRepositories(true));
-  document.querySelector('#project-repository-results').addEventListener('change', fillProjectFromRepository);
-  document.querySelector('#project-repository-query').addEventListener('input', () => {
-    // Keep the current list usable until the user applies the new filter, but
-    // invalidate pending requests and pagination for the previous keyword.
-    repositorySearchVersion += 1;
-    document.querySelector('#project-repository-more').hidden = true;
-    document.querySelector('#project-repository-search').disabled = false;
-    document.querySelector('#project-repository-results').disabled = repositoryMatches.length === 0;
-    document.querySelector('#project-repository-status').textContent = 'Press Search or Enter to apply the keyword filter.';
-  });
-  document.querySelector('#project-repository-query').addEventListener('keydown', (event: KeyboardEvent) => {
-    if (event.key === 'Enter') { event.preventDefault(); void searchProjectRepositories(); }
-  });
-  document.querySelector('#project-repository-source').addEventListener('change', reloadProjectRepositories);
-  ['drone', 'gitea'].forEach((kind) => {
-    document.querySelector(`#project-${kind}-connection`).addEventListener('change', () => {
-      if (document.querySelector('#project-repository-source').value === kind) reloadProjectRepositories();
+  (['project', 'component'] as const).forEach((scope) => {
+    document.querySelector(`#${scope}-repository-search`).addEventListener('click', () => void searchRepositories(scope));
+    document.querySelector(`#${scope}-repository-more`).addEventListener('click', () => void searchRepositories(scope, true));
+    document.querySelector(`#${scope}-repository-results`).addEventListener('change', scope === 'project' ? fillProjectFromRepository : fillComponentFromRepository);
+    document.querySelector(`#${scope}-repository-query`).addEventListener('input', () => {
+      const picker = repositoryPickers[scope];
+      picker.version += 1;
+      document.querySelector(`#${scope}-repository-more`).hidden = true;
+      document.querySelector(`#${scope}-repository-search`).disabled = false;
+      document.querySelector(`#${scope}-repository-results`).disabled = picker.matches.length === 0;
+      document.querySelector(`#${scope}-repository-status`).textContent = 'Press Search or Enter to apply the keyword filter.';
     });
+    document.querySelector(`#${scope}-repository-query`).addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter') { event.preventDefault(); void searchRepositories(scope); }
+    });
+    document.querySelector(`#${scope}-repository-source`).addEventListener('change', () => reloadRepositories(scope));
+    ['drone', 'gitea'].forEach((kind) => {
+      document.querySelector(`#${scope}-${kind}-connection`).addEventListener('change', () => {
+        if (document.querySelector(`#${scope}-repository-source`).value === kind) reloadRepositories(scope);
+      });
+    });
+    const dialog = scope === 'project' ? elements.projectDialog : elements.componentDialog;
+    dialog.addEventListener('close', () => resetRepositorySearch(scope));
   });
-  elements.projectDialog.addEventListener('close', resetRepositorySearch);
   document.querySelector('#component-form').addEventListener('submit', (event: any) => { event.preventDefault(); void saveComponent(event.currentTarget); });
   document.querySelector('#new-connection').addEventListener('click', () => openConnectionDialog(null));
   document.querySelector('#connection-form').addEventListener('submit', (event: any) => { event.preventDefault(); void saveConnection(event.currentTarget); });

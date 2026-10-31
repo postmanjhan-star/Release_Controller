@@ -1648,6 +1648,184 @@ describe("專案設定", () => {
     });
   });
 
+  async function componentRepositoryOptions() {
+    await waitFor(() =>
+      expect(
+        document.querySelector("#component-repository-results"),
+      ).toBeEnabled(),
+    );
+    return document.querySelector(
+      "#component-repository-results",
+    ) as HTMLSelectElement;
+  }
+
+  it("元件選單沿用專案連線，選取後帶入所有 repository 欄位並可送出", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#add-component") as HTMLButtonElement).click();
+    const options = await componentRepositoryOptions();
+    const request = calls.find((call) =>
+      call.path.startsWith("/api/v1/connections/repositories?"),
+    )!;
+    expect(
+      Object.fromEntries(
+        new URL(request.path, "https://controller.test").searchParams,
+      ),
+    ).toEqual({
+      kind: "drone",
+      q: "",
+      page: "1",
+      connection_id: "conn-drone",
+    });
+    fireEvent.change(options, { target: { value: "0" } });
+    const form = document.querySelector("#component-form") as HTMLFormElement;
+    expect(field(form, "key").value).toBe("smt-assistant");
+    expect(field(form, "display_name").value).toBe("SMT.Assistant");
+    for (const kind of ["drone", "gitea"]) {
+      expect(field(form, `${kind}_owner`).value).toBe("acme");
+      expect(field(form, `${kind}_repo`).value).toBe("SMT.Assistant");
+    }
+    expect(field(form, "tag_prefix").value).toBe("v");
+    field(form, "key").value = "server";
+    field(form, "gitea_repo").value = "different-publish-repo";
+    submit("#component-form");
+    await waitFor(() =>
+      expect(
+        called("POST", "/api/v1/projects/default/components"),
+      ).toHaveLength(1),
+    );
+    expect(
+      called("POST", "/api/v1/projects/default/components")[0].body,
+    ).toMatchObject({
+      key: "server",
+      display_name: "SMT.Assistant",
+      drone_owner: "acme",
+      drone_repo: "SMT.Assistant",
+      gitea_owner: "acme",
+      gitea_repo: "different-publish-repo",
+      drone_connection_id: "conn-drone",
+      gitea_connection_id: null,
+      promote_target_override: null,
+      tag_prefix: "v",
+      is_active: true,
+    });
+  });
+
+  it("元件切換到 Gitea 自動載入且使用專案指定的連線", async () => {
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#add-component") as HTMLButtonElement).click();
+    await componentRepositoryOptions();
+    fireEvent.change(document.querySelector("#component-repository-source")!, {
+      target: { value: "gitea" },
+    });
+    const options = await componentRepositoryOptions();
+    const request = [...calls]
+      .reverse()
+      .find((call) =>
+        call.path.startsWith("/api/v1/connections/repositories?"),
+      )!;
+    expect(
+      Object.fromEntries(
+        new URL(request.path, "https://controller.test").searchParams,
+      ),
+    ).toEqual({
+      kind: "gitea",
+      q: "",
+      page: "1",
+      connection_id: "conn-gitea",
+    });
+    fireEvent.change(options, { target: { value: "0" } });
+    const form = document.querySelector("#component-form") as HTMLFormElement;
+    expect(field(form, "gitea_connection_id").value).toBe("conn-gitea");
+    expect(field(form, "drone_connection_id").value).toBe("");
+    expect(field(form, "drone_repo").value).toBe("SMT.Assistant");
+  });
+
+  it.each([false, true])(
+    "同名 repository 自動帶入但保留手動輸入（已有輸入：%s）",
+    async (manual) => {
+      data.projects = [project({ name: "SMT.Assistant" })];
+      await mountApp();
+      await openProjects();
+      const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+      let resolve!: (response: Response) => void;
+      const delayed = new Promise<Response>((done) => {
+        resolve = done;
+      });
+      vi.mocked(fetch).mockImplementation((input, init) =>
+        String(input).includes("/connections/repositories?")
+          ? delayed
+          : originalFetch(input, init),
+      );
+      (document.querySelector("#add-component") as HTMLButtonElement).click();
+      const form = document.querySelector("#component-form") as HTMLFormElement;
+      if (manual) field(form, "display_name").value = "My service";
+      resolve(
+        json({
+          connection_id: "conn-drone",
+          has_more: false,
+          items: [
+            {
+              owner: "acme",
+              name: "SMT.Assistant",
+              full_name: "acme/SMT.Assistant",
+              description: "",
+            },
+          ],
+        }),
+      );
+      await componentRepositoryOptions();
+      expect(field(form, "display_name").value).toBe(
+        manual ? "My service" : "SMT.Assistant",
+      );
+      expect(field(form, "drone_repo").value).toBe(
+        manual ? "" : "SMT.Assistant",
+      );
+      expect(
+        called("POST", "/api/v1/projects/default/components"),
+      ).toHaveLength(0);
+    },
+  );
+
+  it("元件選單可載入更多，並自動避開已存在的 Key", async () => {
+    data.projects[0].components.push(componentRow("worker", 3));
+    await mountApp();
+    await openProjects();
+    (document.querySelector("#add-component") as HTMLButtonElement).click();
+    const options = await componentRepositoryOptions();
+    (
+      document.querySelector("#component-repository-more") as HTMLButtonElement
+    ).click();
+    await waitFor(() => expect(options.options).toHaveLength(3));
+    fireEvent.change(options, { target: { value: "1" } });
+    const form = document.querySelector("#component-form") as HTMLFormElement;
+    expect(field(form, "key").value).toBe("worker-2");
+    expect(field(form, "drone_repo").value).toBe("worker");
+  });
+
+  it("編輯元件不自動載入或覆寫既有 repository 與 tag prefix", async () => {
+    data.projects[0].components[0].tag_prefix = "";
+    await mountApp();
+    await openProjects();
+    (
+      document.querySelector(
+        '[data-edit-component="backend"]',
+      ) as HTMLButtonElement
+    ).click();
+    expect(
+      document.querySelector("#component-repository-picker"),
+    ).not.toBeVisible();
+    const form = document.querySelector("#component-form") as HTMLFormElement;
+    expect(field(form, "drone_repo").value).toBe("backend");
+    expect(field(form, "tag_prefix").value).toBe("");
+    expect(
+      calls.filter((call) =>
+        call.path.startsWith("/api/v1/connections/repositories?"),
+      ),
+    ).toHaveLength(0);
+  });
+
   it("新增元件後回頭更新發布畫面的元件卡片", async () => {
     await mountApp();
     expect(

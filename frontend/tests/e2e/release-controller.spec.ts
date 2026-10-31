@@ -895,6 +895,88 @@ for (const source of ["drone", "gitea"] as const) {
   });
 }
 
+for (const source of ["drone", "gitea"] as const) {
+  test(`adds a component from the ${source} dropdown without typing repository fields`, async ({
+    page,
+  }, testInfo) => {
+    let submitted: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/connections/repositories?*", async (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      const kind = params.get("kind");
+      expect(params.get("connection_id")).toBe(`${kind}-default`);
+      await route.fulfill({
+        json: {
+          connection_id: `${kind}-default`,
+          has_more: false,
+          items: [
+            {
+              owner: "release",
+              name: "worker",
+              full_name: "release/worker",
+              description: "",
+            },
+          ],
+        },
+      });
+    });
+    await page.route("**/api/v1/projects/release/components", async (route) => {
+      submitted = route.request().postDataJSON();
+      await route.fulfill({
+        status: 201,
+        json: {
+          ...projectResponse.items[0].components[0],
+          ...submitted,
+          id: "component-worker",
+        },
+      });
+    });
+    await page.goto("/?view=projects");
+    await page
+      .getByRole("button", { name: "Add component", exact: true })
+      .click();
+    await expect(page.locator("#component-repository-results")).toBeEnabled();
+    if (source === "gitea") {
+      await page.locator("#component-repository-source").selectOption(source);
+      await expect(page.locator("#component-repository-results")).toBeEnabled();
+    }
+    await page
+      .locator("#component-repository-results")
+      .selectOption({ label: "release/worker" });
+    const form = page.locator("#component-form");
+    for (const [name, value] of Object.entries({
+      key: "worker",
+      display_name: "worker",
+      drone_owner: "release",
+      drone_repo: "worker",
+      gitea_owner: "release",
+      gitea_repo: "worker",
+      tag_prefix: "v",
+      promote_target_override: "",
+    })) {
+      await expect(form.locator(`[name="${name}"]`)).toHaveValue(value);
+    }
+    await page.screenshot({
+      path: testInfo.outputPath("component-autofill.png"),
+      fullPage: true,
+    });
+    await page.locator("#component-submit").click();
+    await expect(page.locator("#component-dialog")).not.toBeVisible();
+    expect(submitted).toMatchObject({
+      key: "worker",
+      display_name: "worker",
+      drone_owner: "release",
+      drone_repo: "worker",
+      gitea_owner: "release",
+      gitea_repo: "worker",
+      tag_prefix: "v",
+      promote_target_override: null,
+      [`${source}_connection_id`]: `${source}-default`,
+      publish_enabled: true,
+      is_active: true,
+    });
+  });
+}
+
 test("edits a project's components and its upstream connections", async ({
   page,
 }) => {

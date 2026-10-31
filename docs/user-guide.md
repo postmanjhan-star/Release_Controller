@@ -17,6 +17,13 @@
 搜尋使用伺服器儲存的連線 token，只列出該憑證可存取的
 repository；若尚未設定預設連線，請先指定一組連線。建立後依上述步驟新增部署元件。
 
+**Add component** 也提供相同的 repository 選單，開啟時使用專案的 Drone／Gitea 連線
+自動載入。選取 repository 後，會帶入 Key、Display name、Drone 與 Gitea 的 owner／repository，
+並選用搜尋時實際使用的連線；另一種連線維持繼承專案。Tag prefix 預設為 `v`，Target
+留空以沿用部署時選擇的目標。兩邊 repository 不同時，可修改各自欄位。
+完整清單中若只有一筆與專案名稱或 Key 同名，且尚未開始手動填寫，會直接帶入。
+新增元件前仍可修改資料；編輯既有元件保留原值。
+
 連線可由元件覆寫專案設定，未指定時使用同類型預設連線。
 若寫入時收到 403，請確認是否啟用 `PROJECT_ADMIN_WRITES` 及帳號的 Gitea 管理員身分。
 

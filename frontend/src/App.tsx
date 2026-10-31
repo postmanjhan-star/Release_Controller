@@ -633,6 +633,65 @@ function LegacyDialogs() {
  * fields, because what a form is editing is only known at open time. Nothing
  * here ever renders a stored token: the API returns a hint, never the secret.
  */
+function RepositoryPicker({ scope }: { scope: "project" | "component" }) {
+  return (
+    <fieldset
+      id={`${scope}-repository-picker`}
+      className="repository-picker full-width"
+    >
+      <legend>Fill from Drone / Gitea</legend>
+      <div className="repository-search-controls">
+        <label>
+          Source
+          <select id={`${scope}-repository-source`} defaultValue="drone">
+            <option value="drone">Drone CI</option>
+            <option value="gitea">Gitea</option>
+          </select>
+        </label>
+        <label>
+          Repository keyword (optional)
+          <input
+            id={`${scope}-repository-query`}
+            maxLength={200}
+            placeholder="Filter repositories…"
+          />
+        </label>
+        <button
+          type="button"
+          id={`${scope}-repository-search`}
+          className="button secondary"
+        >
+          Search
+        </button>
+      </div>
+      <label>
+        Repository
+        <select id={`${scope}-repository-results`} disabled defaultValue="">
+          <option value="">Loading repositories…</option>
+        </select>
+      </label>
+      <p
+        id={`${scope}-repository-status`}
+        className="field-help"
+        role="status"
+        aria-live="polite"
+      >
+        {scope === "project"
+          ? "Choose a repository to fill Key, Name and Description."
+          : "Choose a repository to fill the component details. Review Drone and Gitea repositories if they differ."}
+      </p>
+      <button
+        type="button"
+        id={`${scope}-repository-more`}
+        className="button secondary"
+        hidden
+      >
+        Load more
+      </button>
+    </fieldset>
+  );
+}
+
 function SettingsDialogs() {
   return (
     <>
@@ -652,63 +711,7 @@ function SettingsDialogs() {
             </button>
           </div>
           <div className="form-grid">
-            <fieldset
-              id="project-repository-picker"
-              className="repository-picker full-width"
-            >
-              <legend>Fill from Drone / Gitea</legend>
-              <div className="repository-search-controls">
-                <label>
-                  Source
-                  <select id="project-repository-source" defaultValue="drone">
-                    <option value="drone">Drone CI</option>
-                    <option value="gitea">Gitea</option>
-                  </select>
-                </label>
-                <label>
-                  Repository keyword (optional)
-                  <input
-                    id="project-repository-query"
-                    maxLength={200}
-                    placeholder="Filter repositories…"
-                  />
-                </label>
-                <button
-                  type="button"
-                  id="project-repository-search"
-                  className="button secondary"
-                >
-                  Search
-                </button>
-              </div>
-              <label>
-                Repository
-                <select
-                  id="project-repository-results"
-                  disabled
-                  defaultValue=""
-                >
-                  <option value="">Loading repositories…</option>
-                </select>
-              </label>
-              <p
-                id="project-repository-status"
-                className="field-help"
-                role="status"
-                aria-live="polite"
-              >
-                Repositories load from the selected connection below. Choose one
-                to fill Key, Name and Description.
-              </p>
-              <button
-                type="button"
-                id="project-repository-more"
-                className="button secondary"
-                hidden
-              >
-                Load more
-              </button>
-            </fieldset>
+            <RepositoryPicker scope="project" />
             <label id="project-key-field">
               Key
               <input
@@ -782,6 +785,7 @@ function SettingsDialogs() {
             </button>
           </div>
           <div className="form-grid">
+            <RepositoryPicker scope="component" />
             <label id="component-key-field">
               Key
               <input name="key" required maxLength={50} placeholder="backend" />
@@ -839,7 +843,7 @@ function SettingsDialogs() {
             </label>
             <label>
               Tag prefix
-              <input name="tag_prefix" maxLength={30} placeholder="v" />
+              <input name="tag_prefix" maxLength={30} defaultValue="v" />
             </label>
             <label className="checkbox-field">
               <input type="checkbox" name="publish_enabled" defaultChecked />
