@@ -20,6 +20,13 @@ for (const line of pyproject.split(/\r?\n/)) {
   }
 }
 assert(projectVersion, "pyproject.toml must define [project].version");
+assert.deepStrictEqual(
+  JSON.parse(
+    fs.readFileSync(path.join(root, "app/static/version.json"), "utf8"),
+  ),
+  { version: projectVersion },
+  "Deployment version metadata must match the built frontend",
+);
 assert(fs.existsSync(indexPath), "Production frontend has not been built");
 const index = fs.readFileSync(indexPath, "utf8");
 assert(

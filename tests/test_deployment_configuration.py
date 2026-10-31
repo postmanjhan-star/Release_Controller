@@ -165,7 +165,8 @@ def test_health_check_must_succeed_before_release_tagging() -> None:
     assert "if curl -fsS" in health
     assert "--max-time 5" in health
     assert "from_secret: deployment_health_url" in health
-    assert '"$DEPLOYMENT_HEALTH_URL"; then' in health
+    assert '"$DEPLOYMENT_HEALTH_URL" >/dev/null' in health
+    assert '[ "$SERVED_VERSION" = "$EXPECTED_VERSION" ]' in health
     assert "exit 0" in health
     assert health.rstrip().endswith("exit 1")
 
@@ -186,8 +187,18 @@ def run_health_check(tmp_path: Path):
     bin_dir.mkdir()
     curl = bin_dir / "curl"
     curl.write_text(
-        '#!/bin/sh\necho called >> "$HEALTH_CALLS"\n'
+        "#!/bin/sh\n"
         'printf "%s\\n" "$@" >> "$HEALTH_ARGS"\n'
+        'for arg do url="$arg"; done\n'
+        'case "$url" in\n'
+        "  */version.json)\n"
+        '    count=$(wc -l < "$HEALTH_CALLS")\n'
+        '    if [ "$count" -lt "$VERSION_SUCCEED_ON" ]; then\n'
+        '      printf "%s" "$STALE_VERSION"\n'
+        '    else printf \'{"version":"3.1.3"}\'; fi\n'
+        "    exit 0 ;;\n"
+        "esac\n"
+        'echo called >> "$HEALTH_CALLS"\n'
         'count=$(wc -l < "$HEALTH_CALLS")\n'
         '[ "$count" -ge "$HEALTH_SUCCEED_ON" ] && exit 0\nexit 22\n',
         encoding="utf-8",
@@ -200,7 +211,14 @@ def run_health_check(tmp_path: Path):
     # Drone unescapes parameter expressions before starting the container shell.
     script = textwrap.dedent(health.split("      - |\n", 1)[1]).replace("$$", "$")
 
-    def run(url: str | None, succeed_on: int):
+    def run(
+        url: str | None,
+        succeed_on: int,
+        *,
+        version_succeed_on: int = 1,
+        stale_version: str = '{"version":"3.1.1"}',
+    ):
+        (tmp_path / ".release-tag").write_text("v3.1.3\n", encoding="utf-8")
         env = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.defpath}",
@@ -208,6 +226,8 @@ def run_health_check(tmp_path: Path):
             "HEALTH_ARGS": str(tmp_path / "args"),
             "HEALTH_SLEEPS": str(tmp_path / "sleeps"),
             "HEALTH_SUCCEED_ON": str(succeed_on),
+            "VERSION_SUCCEED_ON": str(version_succeed_on),
+            "STALE_VERSION": stale_version,
         }
         env.pop("DEPLOYMENT_HEALTH_URL", None)
         if url is not None:
@@ -237,16 +257,56 @@ def test_health_check_retries_configured_home_url_until_success(run_health_check
     result = run_health_check(url, succeed_on=3)
     assert result.returncode == 0, result.stderr
     assert "Deployment healthy." in result.stdout
-    assert (tmp_path / "args").read_text().splitlines() == ["-fsS", "--max-time", "5", url] * 3
+    assert (tmp_path / "args").read_text().splitlines() == ["-fsS", "--max-time", "5", url] * 3 + [
+        "-fsS",
+        "--max-time",
+        "5",
+        "-H",
+        "Cache-Control: no-cache",
+        "http://release-controller:8000/version.json",
+    ]
     assert len((tmp_path / "sleeps").read_text().splitlines()) == 2
 
 
 def test_health_check_failure_blocks_release_after_all_attempts(run_health_check, tmp_path):
     result = run_health_check("http://nas.example:3100/health", succeed_on=46)
     assert result.returncode == 1
-    assert "Deployment health check failed." in result.stderr
+    assert "Deployment health or frontend version check failed" in result.stderr
     assert "Deployment healthy." not in result.stdout
     assert len((tmp_path / "calls").read_text().splitlines()) == 45
+
+
+@pytest.mark.parametrize("body", ['{"version":"3.1.1"}', "", "<html>proxy page</html>"])
+def test_healthy_old_or_invalid_frontend_cannot_pass_deployment(run_health_check, tmp_path, body):
+    result = run_health_check(
+        "http://nas.example:3100/health",
+        succeed_on=1,
+        version_succeed_on=46,
+        stale_version=body,
+    )
+    assert result.returncode == 1
+    assert "expected v3.1.3" in result.stderr
+    assert "Deployment healthy." not in result.stdout
+    assert len((tmp_path / "calls").read_text().splitlines()) == 45
+
+
+def test_deployment_waits_for_new_frontend_on_same_service_path(run_health_check, tmp_path):
+    result = run_health_check(
+        "http://nas.example:3100/release/health?source=ci",
+        succeed_on=1,
+        version_succeed_on=3,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Frontend version matches v3.1.3" in result.stdout
+    assert len((tmp_path / "calls").read_text().splitlines()) == 3
+    assert "http://nas.example:3100/release/version.json" in (tmp_path / "args").read_text()
+
+
+def test_deployment_rejects_url_without_health_path(run_health_check, tmp_path):
+    result = run_health_check("http://nas.example:3100/", succeed_on=1)
+    assert result.returncode == 1
+    assert "must end in /health" in result.stderr
+    assert not (tmp_path / "calls").exists()
 
 
 def test_portainer_compose_preserves_runtime_configuration() -> None:

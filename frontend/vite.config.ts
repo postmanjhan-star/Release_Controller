@@ -26,10 +26,24 @@ function projectVersion(): string {
   throw new Error(`Missing [project].version in ${pyprojectPath}`);
 }
 
+const appVersion = projectVersion();
+
 export default defineConfig({
   define: {
-    __APP_VERSION__: JSON.stringify(projectVersion()),
+    __APP_VERSION__: JSON.stringify(appVersion),
   },
+  plugins: [
+    {
+      name: "release-version",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "version.json",
+          source: JSON.stringify({ version: appVersion }),
+        });
+      },
+    },
+  ],
   build: {
     outDir: "../app/static",
     emptyOutDir: true,

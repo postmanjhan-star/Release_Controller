@@ -5,6 +5,8 @@ services:
       dockerfile: Containerfile
 
     image: ${RELEASE_CONTROLLER_IMAGE:-release-controller:local}
+    # Git updates must rebuild source even when the local image already exists.
+    pull_policy: build
     container_name: release-controller
     restart: unless-stopped
 

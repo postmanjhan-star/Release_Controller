@@ -246,7 +246,7 @@ steps:
 
 
   # ----------------------------------------------------------
-  # 4. Verify that the deployed application is actually healthy.
+  # 4. Verify health AND the version of the frontend actually being served.
   # ----------------------------------------------------------
   - name: verify-deployment
     image: curlimages/curl:latest
@@ -264,16 +264,27 @@ steps:
           exit 1
         fi
 
-        echo "Waiting for Release Controller health check..."
+        HEALTH_BASE="$${DEPLOYMENT_HEALTH_URL%%\?*}"
+        case "$HEALTH_BASE" in
+          */health) VERSION_URL="$${HEALTH_BASE%/health}/version.json" ;;
+          *) echo "deployment_health_url must end in /health (optional query allowed)." >&2; exit 1 ;;
+        esac
+        RELEASE_TAG="$(cat .release-tag)"
+        VERSION="$${RELEASE_TAG#v}"
+        EXPECTED_VERSION="{\"version\":\"$VERSION\"}"
+
+        echo "Waiting for Release Controller $RELEASE_TAG health and frontend version..."
 
         for i in $(seq 1 45); do
 
           if curl -fsS \
             --max-time 5 \
-            "$DEPLOYMENT_HEALTH_URL"; then
+            "$DEPLOYMENT_HEALTH_URL" >/dev/null &&
+             SERVED_VERSION="$(curl -fsS --max-time 5 \
+               -H 'Cache-Control: no-cache' "$VERSION_URL")" &&
+             [ "$SERVED_VERSION" = "$EXPECTED_VERSION" ]; then
 
-            echo
-            echo "Deployment healthy."
+            echo "Deployment healthy. Frontend version matches $RELEASE_TAG."
             exit 0
           fi
 
@@ -282,7 +293,7 @@ steps:
         done
 
         echo
-        echo "Deployment health check failed." >&2
+        echo "Deployment health or frontend version check failed; expected $RELEASE_TAG." >&2
         exit 1
 
 

@@ -10,7 +10,7 @@
 | 非 `main` / `deploy` 分支 push | `fast-quality` | 前端品質檢查 → Ruff 與全部 Python 測試（不收集 Python coverage） |
 | `main` push / 目標為 `main` 的 pull request | `quality` | 前端品質檢查 → 全部 Python 測試與 coverage → Playwright E2E |
 | `main` 的 cron / custom | `quality` | 同上，完整檢查；不部署 |
-| `main` push 且 quality 成功 | `deploy` | 版本檢查 → 更新 `deploy` 分支 → Portainer redeploy → 健康檢查 → 建立 tag |
+| `main` push 且 quality 成功 | `deploy` | 版本檢查 → 更新 `deploy` 分支 → Portainer 重建及 redeploy → 健康與前端版本檢查 → 建立 tag |
 | `v*` tag | `release` | 使用 `plugins/gitea-release` 建立 Gitea Release |
 
 四個 pipeline 都使用 Docker runner。前端先產出 `app/static`，Python 測試才可驗證首頁資源。
@@ -113,6 +113,8 @@ Portainer step 使用 Python 標準函式庫執行 [`devtools/portainer_redeploy
 Environment 對應、Git 設定及 `refs/heads/deploy` 分支，再 PUT
 `/api/stacks/{id}/git/redeploy?endpointId={id}`。送出時保留目前的 Env、Git ref 與已存的
 Git 認證，避免舊版 Portainer 因欄位省略而清空設定；不輸出成功回應中的環境變數或憑證。
+Compose 的 `pull_policy: build` 要求從更新後的 Git 原始碼重新建置，不能只依賴
+Git redeploy 或 Re-pull image 來更新固定名稱的本機映像。
 HTTP 失敗會記錄方法、資源路徑、狀態碼與 API 的頂層 message，不印完整 response 或 details。
 遇到 redirect 或非 JSON 回應會停止；連線失敗也不會自動重送部署請求。
 PUT 的 502／503／504、連線中斷或非 JSON 成功回應會標示為 `outcome unknown`：
@@ -133,7 +135,8 @@ git diff -- pyproject.toml uv.lock
 將版本與 `uv.lock` 一起提交；版本字串不加 `v`，pipeline 會建立 `v<version>` tag。
 
 `release-preflight` 在更新部署分支前檢查 tag：同名 tag 若指向其他 commit 會停止。
-健康檢查通過後才推送新 tag；若 tag 已指向同一 commit，則不重建。
+`/health` 通過且同一服務的 `/version.json` 符合此次版本後才推送新 tag；
+若 tag 已指向同一 commit，則不重建 tag。`version.json` 與頁面版號使用同一次前端建置的版本。
 手動推送 `v*` tag 也會觸發 release pipeline，因此日常發版應交由上述部署流程建立 tag。
 
 ## 失敗處理
@@ -143,8 +146,10 @@ git diff -- pyproject.toml uv.lock
 - **推送分支失敗**：檢查 Git 憑證與保護規則；既有 `deploy` 分支需可 fast-forward。
 - **Portainer redeploy 失敗**：依 log 中失敗的 GET / PUT 路徑核對 URL、Stack / Environment ID，
   詳細判讀見[疑難排解](troubleshooting.md#drone--portainer)。之後再查 API key、Git 存取與建置 log。
-- **健康檢查失敗**：先確認 `deployment_health_url` 已設定且從建置容器可達，再查容器 log、綁定位址與 migration。
-  URL 未設定時直接失敗；連線檢查最多嘗試 45 次，每次 timeout 5 秒，失敗間隔 2 秒。失敗不建立 tag。
+- **健康或版本檢查失敗**：先確認 `deployment_health_url` 已設定且從建置容器可達，再查容器 log、綁定位址與 migration。
+  若健康正常但版本仍舊，檢查 Portainer 是否實際重建映像、Compose path 與 reverse proxy 目標。
+  URL 必須以 `/health` 結尾（可帶 query），未設定時直接失敗；最多嘗試 45 次，
+  每次健康與版本請求各有 5 秒 timeout，失敗間隔 2 秒。失敗不建立 tag。
 - **Release 未建立**：檢查 tag pipeline 的 token、服務 URL 與執行結果。
 
 目前 Portainer 呼叫使用 `--insecure`，會略過該請求的 TLS 憑證驗證；這是現有設定，非已完成

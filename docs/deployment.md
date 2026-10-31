@@ -22,7 +22,12 @@ docker network inspect ci-portainer --format '{{.Name}}'
 external network；部署到其他主機（包含公司環境）時也需先建立。
 
 請明確選擇 [`compose.portainer.yml`](../compose.portainer.yml)，不要使用根目錄舊的
-`docker-compose.yml`；後者仍引用不存在的 `Dockerfile` 與特定主機路徑。
+`docker-compose.yml`；後者仍含特定主機路徑與不同的環境變數設定。
+
+應用程式同時設定 `build` 與 `pull_policy: build`，每次 Git redeploy 都從目前的
+checkout 重新建置映像（仍可使用 Docker layer cache），避免重用舊的
+`release-controller:local`。Portainer 使用的 Compose 必須支援此 policy；單純啟用
+Re-pull image 只會拉取 registry 映像，不能取代本機原始碼建置。
 
 ## 環境設定
 
@@ -66,7 +71,7 @@ docker logs --tail 100 release-controller
 curl -fsS http://127.0.0.1:3100/health
 ```
 
-也可從 Portainer 查看容器狀態及 log。健康檢查只確認應用程式與資料庫可用；登入後另測試
+也可從 Portainer 查看容器狀態及 log。`/health` 只確認應用程式與資料庫可用；登入後另測試
 Connections 與專案驗證，確認 Drone / Gitea 的權限及 repository mapping。
 
 Drone 的 `verify-deployment` 使用 repository secret `deployment_health_url`，必須填完整的
@@ -75,6 +80,11 @@ Release Controller `/health` URL；沒有預設主機，也不會自動讀取 `H
 且服務發布在該位址的 `3100` 埠時，可填 `http://<NAS-IP>:3100/health`，但必須先從
 Drone 建置容器測試連通；NAS 主機或瀏覽器能連通，不能代表建置容器也可連通。
 `HOST_IP` 預設只綁 `127.0.0.1`，此時 NAS 區網 IP 的入口不會開放。
+
+CI 另從同一路徑的 `/version.json` 核對實際提供的前端版本（例如 `/health` 對應
+`/version.json`，`/release/health` 對應 `/release/version.json`）。此檔與頁面版號在同一次
+Vite build 產生，版本必須符合待發布的 tag；舊版、找不到檔案或 proxy 回傳 HTML 都不能
+通過驗證。部署主機更新 Git 成功或 `/health` 回應 200，均不足以證明新版已上線。
 
 [`compose.portainer.yml`](../compose.portainer.yml) 已將 `release-controller` 加入 Stack
 自己的 `default` 網路與外部 `ci-portainer` 網路；Portainer 重建容器時也會依此自動加入，
